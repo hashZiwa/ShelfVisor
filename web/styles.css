@@ -198,6 +198,34 @@ h2 {
   display: none;
 }
 
+.upload-button.is-disabled,
+.test-image-button.is-disabled,
+.test-image-run-button.is-disabled,
+.secondary-button.is-disabled,
+.debug-toggle.is-disabled,
+body.analysis-running .upload-button,
+body.analysis-running .test-image-button,
+body.analysis-running .test-image-run-button,
+body.analysis-running .secondary-button,
+body.analysis-running .debug-toggle {
+  opacity: 0.68;
+  filter: grayscale(42%) saturate(58%) brightness(0.96);
+  cursor: not-allowed;
+}
+
+body.analysis-running .upload-button *,
+body.analysis-running .debug-toggle *,
+body.analysis-running .upload-button,
+body.analysis-running .debug-toggle {
+  pointer-events: none;
+}
+
+button:disabled,
+input:disabled,
+select:disabled {
+  cursor: not-allowed;
+}
+
 .drop-zone {
   position: relative;
   display: grid;
@@ -212,6 +240,46 @@ h2 {
 .drop-zone.dragging {
   border-color: var(--brand);
   background: #dcebf2;
+}
+
+.drop-zone.is-loading {
+  border-color: var(--brand);
+}
+
+.drop-zone.is-loading #resultImage {
+  opacity: 0.48;
+}
+
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 14px;
+  background: rgba(17, 24, 39, 0.56);
+  color: white;
+  text-align: center;
+}
+
+.loading-overlay[hidden] {
+  display: none;
+}
+
+.spinner {
+  width: 52px;
+  height: 52px;
+  border: 5px solid rgba(255, 255, 255, 0.35);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .empty-state {

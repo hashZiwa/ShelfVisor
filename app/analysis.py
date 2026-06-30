@@ -32,12 +32,12 @@ class Spine:
 
 
 DEFAULT_REFINEMENT_OPTIONS = {
-    "boxPaddingX": 0.12,
-    "boxPaddingY": 0.00,
+    "boxPaddingX": 0.1,
+    "boxPaddingY": 0.0,
     "edgeWeight": 0.45,
     "colorWeight": 0.45,
     "houghWeight": 0.10,
-    "searchZoneRatio": 0.34,
+    "searchZoneRatio": 0.4,
     "minSpineWidth": 18,
     "maxSkew": 0.22,
     "confidenceThreshold": 0.15,

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ShelfVisor</title>
-    <link rel="stylesheet" href="/styles.css?v=batch1" />
+    <link rel="stylesheet" href="/styles.css?v=busy2" />
   </head>
   <body>
     <main class="shell">
@@ -52,6 +52,10 @@
             <span>The demo will detect book spines and check call-number order.</span>
           </div>
           <img id="resultImage" alt="Analysis result" hidden />
+          <div id="loadingOverlay" class="loading-overlay" hidden>
+            <div class="spinner" aria-hidden="true"></div>
+            <strong>Analyzing...</strong>
+          </div>
         </div>
 
         <div id="batchTabs" class="batch-tabs" hidden></div>
@@ -135,6 +139,6 @@
         </section>
       </section>
     </main>
-    <script src="/app.js?v=batch1"></script>
+    <script src="/app.js?v=busy1"></script>
   </body>
 </html>

@@ -1,5 +1,7 @@
 const imageInput = document.querySelector("#imageInput");
+const uploadButton = document.querySelector(".upload-button");
 const debugInput = document.querySelector("#debugInput");
+const debugToggle = document.querySelector(".debug-toggle");
 const debugNotice = document.querySelector("#debugNotice");
 const testImageChooserButton = document.querySelector("#testImageChooserButton");
 const testImagePanel = document.querySelector("#testImagePanel");
@@ -9,6 +11,7 @@ const runTestImagesButton = document.querySelector("#runTestImagesButton");
 const dropZone = document.querySelector("#dropZone");
 const resultImage = document.querySelector("#resultImage");
 const emptyState = document.querySelector(".empty-state");
+const loadingOverlay = document.querySelector("#loadingOverlay");
 const batchTabs = document.querySelector("#batchTabs");
 const bookCount = document.querySelector("#bookCount");
 const misplacedCount = document.querySelector("#misplacedCount");
@@ -22,8 +25,25 @@ const debugMeta = document.querySelector("#debugMeta");
 const refinementControls = document.querySelector("#refinementControls");
 const rerunButton = document.querySelector("#rerunButton");
 const refinementInputs = Array.from(document.querySelectorAll("[data-param]"));
+const analysisControls = [
+  imageInput,
+  debugInput,
+  testImageChooserButton,
+  testImageSelect,
+  runTestImagesButton,
+  rerunButton,
+  ...refinementInputs,
+];
+const visualAnalysisControls = [
+  uploadButton,
+  debugToggle,
+  testImageChooserButton,
+  runTestImagesButton,
+  rerunButton,
+];
 const MAX_BATCH_IMAGES = 5;
 
+let isAnalyzing = false;
 let lastFile = null;
 let lastFiles = [];
 let lastRunWasTestImage = false;
@@ -39,6 +59,7 @@ debugInput.addEventListener("change", () => {
 });
 
 imageInput.addEventListener("change", () => {
+  if (isAnalyzing) return;
   const files = Array.from(imageInput.files);
   if (files.length === 1) {
     analyze(files[0]);
@@ -48,6 +69,7 @@ imageInput.addEventListener("change", () => {
 });
 
 rerunButton.addEventListener("click", () => {
+  if (isAnalyzing) return;
   if (lastRunWasTestImage && lastTestImageNames.length > 0) {
     analyzeTestImages(lastTestImageNames);
   } else if (lastFiles.length > 1) {
@@ -58,6 +80,7 @@ rerunButton.addEventListener("click", () => {
 });
 
 testImageChooserButton.addEventListener("click", () => {
+  if (isAnalyzing) return;
   testImagePanel.hidden = !testImagePanel.hidden;
   if (!testImagePanel.hidden) {
     loadTestImages();
@@ -65,6 +88,7 @@ testImageChooserButton.addEventListener("click", () => {
 });
 
 runTestImagesButton.addEventListener("click", () => {
+  if (isAnalyzing) return;
   const selectedNames = getSelectedTestImageNames();
   if (selectedNames.length === 0) {
     setError("Select at least one test image.");
@@ -84,6 +108,7 @@ dropZone.addEventListener("dragleave", () => {
 
 dropZone.addEventListener("drop", (event) => {
   event.preventDefault();
+  if (isAnalyzing) return;
   dropZone.classList.remove("dragging");
   const files = Array.from(event.dataTransfer.files).filter((file) => file.type.startsWith("image/"));
   if (files.length === 1) {
@@ -94,18 +119,23 @@ dropZone.addEventListener("drop", (event) => {
 });
 
 async function analyze(file) {
+  if (isAnalyzing) return;
   lastFile = file;
   lastFiles = [file];
   lastRunWasTestImage = false;
   lastTestImageNames = [];
   setLoading();
 
-  const payload = await postAnalysis("/api/analyze", file);
-  if (!payload) return;
-  renderPayload(payload);
+  try {
+    const payload = await postAnalysis("/api/analyze", file);
+    finishAnalysis(payload);
+  } catch (error) {
+    setError(`Analysis failed: ${error.message}`);
+  }
 }
 
 async function analyzeBatch(files) {
+  if (isAnalyzing) return;
   if (files.length > MAX_BATCH_IMAGES) {
     setError(`Please upload up to ${MAX_BATCH_IMAGES} images.`);
     return;
@@ -117,21 +147,28 @@ async function analyzeBatch(files) {
   lastTestImageNames = [];
   setLoading();
 
-  const payload = await postBatchAnalysis(files);
-  if (!payload) return;
-  renderPayload(payload);
+  try {
+    const payload = await postBatchAnalysis(files);
+    finishAnalysis(payload);
+  } catch (error) {
+    setError(`Batch analysis failed: ${error.message}`);
+  }
 }
 
 async function analyzeTestImages(imageNames) {
+  if (isAnalyzing) return;
   lastFile = null;
   lastFiles = [];
   lastRunWasTestImage = true;
   lastTestImageNames = imageNames;
   setLoading();
 
-  const payload = await postTestImageAnalysis(imageNames);
-  if (!payload) return;
-  renderPayload(payload);
+  try {
+    const payload = await postTestImageAnalysis(imageNames);
+    finishAnalysis(payload);
+  } catch (error) {
+    setError(`Test image analysis failed: ${error.message}`);
+  }
 }
 
 async function loadTestImages() {
@@ -243,10 +280,14 @@ function renderPayload(payload) {
 }
 
 function setLoading() {
+  isAnalyzing = true;
+  setAnalysisControlsDisabled(true);
   helperText.textContent = debugInput.checked
     ? "Analyzing with debug images..."
     : "Analyzing...";
   analysisStatus.textContent = "Running";
+  dropZone.classList.add("is-loading");
+  loadingOverlay.hidden = false;
   spineList.innerHTML = "";
   batchTabs.hidden = true;
   batchTabs.innerHTML = "";
@@ -259,6 +300,31 @@ function setLoading() {
 function setError(message) {
   helperText.textContent = message;
   analysisStatus.textContent = "Error";
+  clearLoadingState();
+}
+
+function finishAnalysis(payload) {
+  clearLoadingState();
+  if (!payload) return;
+  renderPayload(payload);
+}
+
+function clearLoadingState() {
+  isAnalyzing = false;
+  setAnalysisControlsDisabled(false);
+  dropZone.classList.remove("is-loading");
+  loadingOverlay.hidden = true;
+}
+
+function setAnalysisControlsDisabled(disabled) {
+  analysisControls.forEach((control) => {
+    control.disabled = disabled;
+  });
+  visualAnalysisControls.forEach((control) => {
+    control.classList.toggle("is-disabled", disabled);
+    control.setAttribute("aria-disabled", disabled ? "true" : "false");
+  });
+  document.body.classList.toggle("analysis-running", disabled);
 }
 
 function renderBatchResult(payload) {
