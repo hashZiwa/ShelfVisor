@@ -1,10 +1,15 @@
 const imageInput = document.querySelector("#imageInput");
 const debugInput = document.querySelector("#debugInput");
 const debugNotice = document.querySelector("#debugNotice");
-const testImageButton = document.querySelector("#testImageButton");
+const testImageChooserButton = document.querySelector("#testImageChooserButton");
+const testImagePanel = document.querySelector("#testImagePanel");
+const testImageSelect = document.querySelector("#testImageSelect");
+const testImageMeta = document.querySelector("#testImageMeta");
+const runTestImagesButton = document.querySelector("#runTestImagesButton");
 const dropZone = document.querySelector("#dropZone");
 const resultImage = document.querySelector("#resultImage");
 const emptyState = document.querySelector(".empty-state");
+const batchTabs = document.querySelector("#batchTabs");
 const bookCount = document.querySelector("#bookCount");
 const misplacedCount = document.querySelector("#misplacedCount");
 const analysisStatus = document.querySelector("#analysisStatus");
@@ -17,30 +22,55 @@ const debugMeta = document.querySelector("#debugMeta");
 const refinementControls = document.querySelector("#refinementControls");
 const rerunButton = document.querySelector("#rerunButton");
 const refinementInputs = Array.from(document.querySelectorAll("[data-param]"));
+const MAX_BATCH_IMAGES = 5;
 
 let lastFile = null;
+let lastFiles = [];
 let lastRunWasTestImage = false;
+let lastTestImageNames = [];
+let lastPayload = null;
+let testImagesLoaded = false;
 
 debugInput.addEventListener("change", () => {
-  debugNotice.hidden = !debugInput.checked;
-  testImageButton.hidden = !debugInput.checked;
+  const isDebug = debugInput.checked;
+  debugNotice.hidden = !isDebug;
+  testImageChooserButton.hidden = !isDebug;
+  testImagePanel.hidden = true;
 });
 
 imageInput.addEventListener("change", () => {
-  const [file] = imageInput.files;
-  if (file) analyze(file);
+  const files = Array.from(imageInput.files);
+  if (files.length === 1) {
+    analyze(files[0]);
+  } else if (files.length > 1) {
+    analyzeBatch(files);
+  }
 });
 
 rerunButton.addEventListener("click", () => {
-  if (lastRunWasTestImage) {
-    analyzeTestImage();
+  if (lastRunWasTestImage && lastTestImageNames.length > 0) {
+    analyzeTestImages(lastTestImageNames);
+  } else if (lastFiles.length > 1) {
+    analyzeBatch(lastFiles);
   } else if (lastFile) {
     analyze(lastFile);
   }
 });
 
-testImageButton.addEventListener("click", () => {
-  analyzeTestImage();
+testImageChooserButton.addEventListener("click", () => {
+  testImagePanel.hidden = !testImagePanel.hidden;
+  if (!testImagePanel.hidden) {
+    loadTestImages();
+  }
+});
+
+runTestImagesButton.addEventListener("click", () => {
+  const selectedNames = getSelectedTestImageNames();
+  if (selectedNames.length === 0) {
+    setError("Select at least one test image.");
+    return;
+  }
+  analyzeTestImages(selectedNames);
 });
 
 dropZone.addEventListener("dragover", (event) => {
@@ -55,13 +85,19 @@ dropZone.addEventListener("dragleave", () => {
 dropZone.addEventListener("drop", (event) => {
   event.preventDefault();
   dropZone.classList.remove("dragging");
-  const [file] = event.dataTransfer.files;
-  if (file) analyze(file);
+  const files = Array.from(event.dataTransfer.files).filter((file) => file.type.startsWith("image/"));
+  if (files.length === 1) {
+    analyze(files[0]);
+  } else if (files.length > 1) {
+    analyzeBatch(files);
+  }
 });
 
 async function analyze(file) {
   lastFile = file;
+  lastFiles = [file];
   lastRunWasTestImage = false;
+  lastTestImageNames = [];
   setLoading();
 
   const payload = await postAnalysis("/api/analyze", file);
@@ -69,13 +105,106 @@ async function analyze(file) {
   renderPayload(payload);
 }
 
-async function analyzeTestImage() {
-  lastRunWasTestImage = true;
+async function analyzeBatch(files) {
+  if (files.length > MAX_BATCH_IMAGES) {
+    setError(`Please upload up to ${MAX_BATCH_IMAGES} images.`);
+    return;
+  }
+
+  lastFile = files[0] || null;
+  lastFiles = files;
+  lastRunWasTestImage = false;
+  lastTestImageNames = [];
   setLoading();
 
-  const payload = await postAnalysis("/api/analyze-test-image");
+  const payload = await postBatchAnalysis(files);
   if (!payload) return;
   renderPayload(payload);
+}
+
+async function analyzeTestImages(imageNames) {
+  lastFile = null;
+  lastFiles = [];
+  lastRunWasTestImage = true;
+  lastTestImageNames = imageNames;
+  setLoading();
+
+  const payload = await postTestImageAnalysis(imageNames);
+  if (!payload) return;
+  renderPayload(payload);
+}
+
+async function loadTestImages() {
+  if (testImagesLoaded) return;
+  testImageMeta.textContent = "Loading test images...";
+
+  try {
+    const response = await fetch("/api/test-images");
+    const payload = await response.json();
+    if (!response.ok) {
+      testImageMeta.textContent = payload.detail || "Failed to load test images.";
+      return;
+    }
+
+    testImagesLoaded = true;
+    testImageSelect.innerHTML = payload.images
+      .map((image, index) => `<option value="${escapeHtml(image.name)}" ${index === 0 ? "selected" : ""}>${escapeHtml(image.name)}</option>`)
+      .join("");
+    testImageMeta.textContent =
+      payload.count === 0
+        ? "No test images found in the test_images folder."
+        : `Found ${payload.count} test image${payload.count === 1 ? "" : "s"}. Select up to ${payload.maxImages}.`;
+  } catch (error) {
+    testImageMeta.textContent = `Failed to load test images: ${error.message}`;
+  }
+}
+
+async function postBatchAnalysis(files) {
+  const formData = new FormData();
+  files.forEach((file) => {
+    formData.append("images", file);
+  });
+  formData.append("debug", debugInput.checked ? "true" : "false");
+  refinementInputs.forEach((input) => {
+    formData.append(input.dataset.param, input.value);
+  });
+
+  const response = await fetch("/api/analyze-batch", {
+    method: "POST",
+    body: formData,
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    setError(payload.detail || payload.error || "Batch analysis failed.");
+    return null;
+  }
+
+  return payload;
+}
+
+async function postTestImageAnalysis(imageNames) {
+  const formData = new FormData();
+  imageNames.forEach((imageName) => {
+    formData.append("image_names", imageName);
+  });
+  formData.append("debug", debugInput.checked ? "true" : "false");
+  refinementInputs.forEach((input) => {
+    formData.append(input.dataset.param, input.value);
+  });
+
+  const response = await fetch("/api/analyze-test-images", {
+    method: "POST",
+    body: formData,
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    setError(payload.detail || payload.error || "Test image analysis failed.");
+    return null;
+  }
+
+  return payload;
 }
 
 async function postAnalysis(url, file = null) {
@@ -103,7 +232,14 @@ async function postAnalysis(url, file = null) {
 }
 
 function renderPayload(payload) {
-  renderResult(payload);
+  lastPayload = payload;
+  if (payload.results) {
+    renderBatchResult(payload);
+  } else {
+    batchTabs.hidden = true;
+    batchTabs.innerHTML = "";
+    renderResult(payload);
+  }
 }
 
 function setLoading() {
@@ -112,6 +248,8 @@ function setLoading() {
     : "Analyzing...";
   analysisStatus.textContent = "Running";
   spineList.innerHTML = "";
+  batchTabs.hidden = true;
+  batchTabs.innerHTML = "";
   debugPanel.hidden = true;
   debugTabs.innerHTML = "";
   refinementControls.hidden = true;
@@ -121,6 +259,54 @@ function setLoading() {
 function setError(message) {
   helperText.textContent = message;
   analysisStatus.textContent = "Error";
+}
+
+function renderBatchResult(payload) {
+  batchTabs.hidden = false;
+  batchTabs.innerHTML = payload.results
+    .map((item, index) => {
+      const label = item.filename || `Image ${index + 1}`;
+      const statusClass = item.status === "completed" ? "completed" : "failed";
+      return `<button class="batch-tab ${index === 0 ? "active" : ""} ${statusClass}" type="button" data-index="${index}">
+        ${index + 1}. ${label}
+      </button>`;
+    })
+    .join("");
+
+  batchTabs.querySelectorAll(".batch-tab").forEach((button) => {
+    button.addEventListener("click", () => {
+      const index = Number(button.dataset.index);
+      showBatchItem(payload, index);
+      batchTabs.querySelectorAll(".batch-tab").forEach((tab) => tab.classList.remove("active"));
+      button.classList.add("active");
+    });
+  });
+
+  const firstCompletedIndex = payload.results.findIndex((item) => item.status === "completed");
+  showBatchItem(payload, firstCompletedIndex >= 0 ? firstCompletedIndex : 0);
+}
+
+function showBatchItem(payload, index) {
+  const item = payload.results[index];
+  if (!item || item.status !== "completed") {
+    renderFailedBatchItem(item, payload.summary);
+    return;
+  }
+
+  renderResult(item.result);
+  helperText.textContent = `${helperText.textContent} Batch ${payload.summary.completedCount}/${payload.summary.imageCount} completed.`;
+}
+
+function renderFailedBatchItem(item, summary) {
+  emptyState.hidden = true;
+  resultImage.hidden = true;
+  resultImage.removeAttribute("src");
+  bookCount.textContent = "0";
+  misplacedCount.textContent = "0";
+  analysisStatus.textContent = "Failed";
+  helperText.textContent = `${item?.filename || "Image"} failed: ${item?.error || "Unknown error"}. Batch ${summary.completedCount}/${summary.imageCount} completed.`;
+  spineList.innerHTML = "";
+  debugPanel.hidden = true;
 }
 
 function renderResult(payload) {
@@ -213,4 +399,16 @@ function syncRefinementInputs(options) {
       input.value = options[key];
     }
   });
+}
+
+function getSelectedTestImageNames() {
+  return Array.from(testImageSelect.selectedOptions).map((option) => option.value);
+}
+
+function escapeHtml(value) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }

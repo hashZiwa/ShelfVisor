@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ShelfVisor</title>
-    <link rel="stylesheet" href="/styles.css?v=refine1" />
+    <link rel="stylesheet" href="/styles.css?v=batch1" />
   </head>
   <body>
     <main class="shell">
@@ -15,15 +15,15 @@
             <h1>Shelf order check</h1>
           </div>
           <div class="actions">
-            <button id="testImageButton" class="test-image-button" type="button" hidden>
-              Run test image
+            <button id="testImageChooserButton" class="test-image-button" type="button" hidden>
+              Choose from test images
             </button>
             <label class="debug-toggle">
               <input id="debugInput" type="checkbox" />
               <span>Debug mode</span>
             </label>
             <label class="upload-button">
-              <input id="imageInput" type="file" accept="image/*" />
+              <input id="imageInput" type="file" accept="image/*" multiple />
               Choose photo
             </label>
           </div>
@@ -33,6 +33,19 @@
           Debug mode is on. The next upload will include OpenCV intermediate images.
         </div>
 
+        <section id="testImagePanel" class="test-image-panel" hidden>
+          <div class="section-heading">
+            <h2>Test images</h2>
+            <span id="testImageMeta">Select one or more images from the test_images folder.</span>
+          </div>
+          <select id="testImageSelect" class="test-image-select" multiple></select>
+          <div class="test-image-actions">
+            <button id="runTestImagesButton" class="test-image-run-button" type="button">
+              Run
+            </button>
+          </div>
+        </section>
+
         <div id="dropZone" class="drop-zone">
           <div class="empty-state">
             <strong>Upload a shelf photo</strong>
@@ -40,6 +53,8 @@
           </div>
           <img id="resultImage" alt="Analysis result" hidden />
         </div>
+
+        <div id="batchTabs" class="batch-tabs" hidden></div>
 
         <div class="status-row">
           <div class="metric">
@@ -120,6 +135,6 @@
         </section>
       </section>
     </main>
-    <script src="/app.js?v=refine1"></script>
+    <script src="/app.js?v=batch1"></script>
   </body>
 </html>
