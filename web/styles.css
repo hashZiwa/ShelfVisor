@@ -79,6 +79,23 @@ body {
   accent-color: var(--brand);
 }
 
+.test-image-button {
+  min-height: 36px;
+  padding: 0 11px;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  background: #fff7ed;
+  color: #8a4b0f;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.test-image-button[hidden] {
+  display: none;
+}
+
 .debug-notice {
   padding: 12px 16px;
   border: 1px solid #f59e0b;
@@ -388,6 +405,10 @@ h2 {
 
   .debug-toggle {
     justify-content: center;
+    width: 100%;
+  }
+
+  .test-image-button {
     width: 100%;
   }
 

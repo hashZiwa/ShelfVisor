@@ -17,9 +17,11 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB_ROOT = ROOT / "web"
+TEST_IMAGES_ROOT = ROOT / "test_images"
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("SHELFVISOR_PORT", "8000"))
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+TEST_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 app = FastAPI(
     title="ShelfVisor",
@@ -38,7 +40,7 @@ async def analyze(
     image: UploadFile = File(...),
     debug: bool = Form(False),
     box_padding_x: float = Form(0.12),
-    box_padding_y: float = Form(0.04),
+    box_padding_y: float = Form(0.00),
     edge_weight: float = Form(0.45),
     color_weight: float = Form(0.45),
     hough_weight: float = Form(0.10),
@@ -60,22 +62,96 @@ async def analyze(
         return analyze_shelf_photo(
             image_bytes,
             include_debug=debug,
-            refinement_options={
-                "boxPaddingX": box_padding_x,
-                "boxPaddingY": box_padding_y,
-                "edgeWeight": edge_weight,
-                "colorWeight": color_weight,
-                "houghWeight": hough_weight,
-                "searchZoneRatio": search_zone_ratio,
-                "minSpineWidth": min_spine_width,
-                "maxSkew": max_skew,
-                "confidenceThreshold": confidence_threshold,
-            },
+            refinement_options=_refinement_options_from_form(
+                box_padding_x,
+                box_padding_y,
+                edge_weight,
+                color_weight,
+                hough_weight,
+                search_zone_ratio,
+                min_spine_width,
+                max_skew,
+                confidence_threshold,
+            ),
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Analysis failed: {error}") from error
+
+
+@app.post("/api/analyze-test-image")
+async def analyze_test_image(
+    debug: bool = Form(True),
+    box_padding_x: float = Form(0.12),
+    box_padding_y: float = Form(0.00),
+    edge_weight: float = Form(0.45),
+    color_weight: float = Form(0.45),
+    hough_weight: float = Form(0.10),
+    search_zone_ratio: float = Form(0.34),
+    min_spine_width: int = Form(18),
+    max_skew: float = Form(0.22),
+    confidence_threshold: float = Form(0.15),
+) -> dict[str, Any]:
+    image_path = _first_test_image()
+    if image_path is None:
+        raise HTTPException(status_code=404, detail="No test image found in test_images.")
+
+    try:
+        result = analyze_shelf_photo(
+            image_path.read_bytes(),
+            include_debug=debug,
+            refinement_options=_refinement_options_from_form(
+                box_padding_x,
+                box_padding_y,
+                edge_weight,
+                color_weight,
+                hough_weight,
+                search_zone_ratio,
+                min_spine_width,
+                max_skew,
+                confidence_threshold,
+            ),
+        )
+        result["summary"]["sourceImage"] = image_path.name
+        return result
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {error}") from error
+
+
+def _first_test_image() -> Path | None:
+    if not TEST_IMAGES_ROOT.exists():
+        return None
+    images = sorted(
+        path for path in TEST_IMAGES_ROOT.iterdir() if path.is_file() and path.suffix.lower() in TEST_IMAGE_EXTENSIONS
+    )
+    return images[0] if images else None
+
+
+def _refinement_options_from_form(
+    box_padding_x: float,
+    box_padding_y: float,
+    edge_weight: float,
+    color_weight: float,
+    hough_weight: float,
+    search_zone_ratio: float,
+    min_spine_width: int,
+    max_skew: float,
+    confidence_threshold: float,
+) -> dict[str, Any]:
+    return {
+        "boxPaddingX": box_padding_x,
+        "boxPaddingY": box_padding_y,
+        "edgeWeight": edge_weight,
+        "colorWeight": color_weight,
+        "houghWeight": hough_weight,
+        "searchZoneRatio": search_zone_ratio,
+        "minSpineWidth": min_spine_width,
+        "maxSkew": max_skew,
+        "confidenceThreshold": confidence_threshold,
+    }
 
 
 @app.get("/")

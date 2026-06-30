@@ -1,6 +1,7 @@
 const imageInput = document.querySelector("#imageInput");
 const debugInput = document.querySelector("#debugInput");
 const debugNotice = document.querySelector("#debugNotice");
+const testImageButton = document.querySelector("#testImageButton");
 const dropZone = document.querySelector("#dropZone");
 const resultImage = document.querySelector("#resultImage");
 const emptyState = document.querySelector(".empty-state");
@@ -18,9 +19,11 @@ const rerunButton = document.querySelector("#rerunButton");
 const refinementInputs = Array.from(document.querySelectorAll("[data-param]"));
 
 let lastFile = null;
+let lastRunWasTestImage = false;
 
 debugInput.addEventListener("change", () => {
   debugNotice.hidden = !debugInput.checked;
+  testImageButton.hidden = !debugInput.checked;
 });
 
 imageInput.addEventListener("change", () => {
@@ -29,7 +32,15 @@ imageInput.addEventListener("change", () => {
 });
 
 rerunButton.addEventListener("click", () => {
-  if (lastFile) analyze(lastFile);
+  if (lastRunWasTestImage) {
+    analyzeTestImage();
+  } else if (lastFile) {
+    analyze(lastFile);
+  }
+});
+
+testImageButton.addEventListener("click", () => {
+  analyzeTestImage();
 });
 
 dropZone.addEventListener("dragover", (event) => {
@@ -50,16 +61,34 @@ dropZone.addEventListener("drop", (event) => {
 
 async function analyze(file) {
   lastFile = file;
+  lastRunWasTestImage = false;
   setLoading();
 
+  const payload = await postAnalysis("/api/analyze", file);
+  if (!payload) return;
+  renderPayload(payload);
+}
+
+async function analyzeTestImage() {
+  lastRunWasTestImage = true;
+  setLoading();
+
+  const payload = await postAnalysis("/api/analyze-test-image");
+  if (!payload) return;
+  renderPayload(payload);
+}
+
+async function postAnalysis(url, file = null) {
   const formData = new FormData();
-  formData.append("image", file);
+  if (file) {
+    formData.append("image", file);
+  }
   formData.append("debug", debugInput.checked ? "true" : "false");
   refinementInputs.forEach((input) => {
     formData.append(input.dataset.param, input.value);
   });
 
-  const response = await fetch("/api/analyze", {
+  const response = await fetch(url, {
     method: "POST",
     body: formData,
   });
@@ -67,9 +96,13 @@ async function analyze(file) {
   const payload = await response.json();
   if (!response.ok) {
     setError(payload.detail || payload.error || "Analysis failed.");
-    return;
+    return null;
   }
 
+  return payload;
+}
+
+function renderPayload(payload) {
   renderResult(payload);
 }
 
@@ -102,6 +135,9 @@ function renderResult(payload) {
     payload.summary.status === "ok"
       ? "The current demo rule sees this order as correct."
       : "Red items are not in the expected order.";
+  if (payload.summary.sourceImage) {
+    helperText.textContent = `${helperText.textContent} Source: ${payload.summary.sourceImage}.`;
+  }
 
   spineList.innerHTML = payload.spines.map(renderSpine).join("");
   renderDebug(payload.debug);
