@@ -1,0 +1,1 @@
+"""ShelfVisor application package."""

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ShelfVisor</title>
+    <link rel="stylesheet" href="/styles.css?v=debug2" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="workspace" aria-label="ShelfVisor analyzer">
+        <div class="topbar">
+          <div>
+            <p class="eyebrow">ShelfVisor</p>
+            <h1>Shelf order check</h1>
+          </div>
+          <div class="actions">
+            <label class="debug-toggle">
+              <input id="debugInput" type="checkbox" />
+              <span>Debug mode</span>
+            </label>
+            <label class="upload-button">
+              <input id="imageInput" type="file" accept="image/*" />
+              Choose photo
+            </label>
+          </div>
+        </div>
+
+        <div id="debugNotice" class="debug-notice" hidden>
+          Debug mode is on. The next upload will include OpenCV intermediate images.
+        </div>
+
+        <div id="dropZone" class="drop-zone">
+          <div class="empty-state">
+            <strong>Upload a shelf photo</strong>
+            <span>The demo will detect book spines and check call-number order.</span>
+          </div>
+          <img id="resultImage" alt="Analysis result" hidden />
+        </div>
+
+        <div class="status-row">
+          <div class="metric">
+            <span>Books</span>
+            <strong id="bookCount">0</strong>
+          </div>
+          <div class="metric">
+            <span>Needs review</span>
+            <strong id="misplacedCount">0</strong>
+          </div>
+          <div class="metric">
+            <span>Status</span>
+            <strong id="analysisStatus">Idle</strong>
+          </div>
+        </div>
+
+        <section id="debugPanel" class="results debug-panel" aria-label="Debug stages" hidden>
+          <div class="section-heading">
+            <h2>Debug stages</h2>
+            <span id="debugMeta">Intermediate images will appear here.</span>
+          </div>
+          <div id="debugTabs" class="debug-tabs"></div>
+          <div class="debug-image-wrap">
+            <img id="debugImage" alt="Debug stage" />
+          </div>
+        </section>
+
+        <section class="results" aria-label="Detected call numbers">
+          <div class="section-heading">
+            <h2>Call numbers</h2>
+            <span id="helperText">Analysis results will appear here.</span>
+          </div>
+          <div id="spineList" class="spine-list"></div>
+        </section>
+      </section>
+    </main>
+    <script src="/app.js?v=debug2"></script>
+  </body>
+</html>
