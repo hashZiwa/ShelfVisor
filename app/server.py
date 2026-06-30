@@ -34,7 +34,19 @@ def health_check() -> dict[str, str]:
 
 
 @app.post("/api/analyze")
-async def analyze(image: UploadFile = File(...), debug: bool = Form(False)) -> dict[str, Any]:
+async def analyze(
+    image: UploadFile = File(...),
+    debug: bool = Form(False),
+    box_padding_x: float = Form(0.12),
+    box_padding_y: float = Form(0.04),
+    edge_weight: float = Form(0.45),
+    color_weight: float = Form(0.45),
+    hough_weight: float = Form(0.10),
+    search_zone_ratio: float = Form(0.34),
+    min_spine_width: int = Form(18),
+    max_skew: float = Form(0.22),
+    confidence_threshold: float = Form(0.15),
+) -> dict[str, Any]:
     if image.content_type and not image.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Please upload an image file.")
 
@@ -45,7 +57,21 @@ async def analyze(image: UploadFile = File(...), debug: bool = Form(False)) -> d
         raise HTTPException(status_code=413, detail="Please upload an image smaller than 15MB.")
 
     try:
-        return analyze_shelf_photo(image_bytes, include_debug=debug)
+        return analyze_shelf_photo(
+            image_bytes,
+            include_debug=debug,
+            refinement_options={
+                "boxPaddingX": box_padding_x,
+                "boxPaddingY": box_padding_y,
+                "edgeWeight": edge_weight,
+                "colorWeight": color_weight,
+                "houghWeight": hough_weight,
+                "searchZoneRatio": search_zone_ratio,
+                "minSpineWidth": min_spine_width,
+                "maxSkew": max_skew,
+                "confidenceThreshold": confidence_threshold,
+            },
+        )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except Exception as error:
