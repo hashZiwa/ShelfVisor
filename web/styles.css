@@ -309,6 +309,54 @@ select:disabled {
   grid-template-columns: repeat(3, 1fr);
 }
 
+.batch-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.batch-tabs[hidden] {
+  display: none;
+}
+
+.batch-tab {
+  max-width: 240px;
+  min-height: 36px;
+  padding: 0 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8fafc;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.batch-tab.active {
+  border-color: var(--brand);
+  background: #e2f0f6;
+  color: var(--brand);
+}
+
+.batch-tab.failed {
+  border-color: rgba(220, 70, 65, 0.45);
+  background: #fff5f4;
+  color: var(--danger);
+}
+
+.batch-tab.completed:not(.active) {
+  border-color: rgba(43, 156, 94, 0.32);
+}
+
 .metric {
   display: grid;
   gap: 6px;

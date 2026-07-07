@@ -44,6 +44,7 @@ let lastRunWasTestImage = false;
 let lastTestImageNames = [];
 let lastPayload = null;
 let testImagesLoaded = false;
+let selectedDebugStageIndex = 0;
 
 debugInput.addEventListener("change", () => {
   const isDebug = debugInput.checked;
@@ -394,26 +395,31 @@ function renderDebug(debug) {
   debugTabs.innerHTML = debug.stages
     .map(
       (stage, index) =>
-        `<button class="debug-tab ${index === 0 ? "active" : ""}" type="button" data-index="${index}">
+        `<button class="debug-tab" type="button" data-index="${index}" aria-pressed="false">
           ${index + 1}. ${stage.label}
         </button>`,
     )
     .join("");
 
-  setDebugStage(debug, 0);
+  const stageIndex = Math.min(selectedDebugStageIndex, debug.stages.length - 1);
+  setDebugStage(debug, stageIndex);
   debugTabs.querySelectorAll(".debug-tab").forEach((button) => {
     button.addEventListener("click", () => {
       const index = Number(button.dataset.index);
       setDebugStage(debug, index);
-      debugTabs.querySelectorAll(".debug-tab").forEach((tab) => tab.classList.remove("active"));
-      button.classList.add("active");
     });
   });
 }
 
 function setDebugStage(debug, index) {
   const stage = debug.stages[index];
+  selectedDebugStageIndex = index;
   debugImage.src = stage.image;
+  debugTabs.querySelectorAll(".debug-tab").forEach((tab) => {
+    const isActive = Number(tab.dataset.index) === index;
+    tab.classList.toggle("active", isActive);
+    tab.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
 }
 
 function getSelectedTestImageNames() {
