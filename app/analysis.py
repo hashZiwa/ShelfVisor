@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFont
 
 try:
     from .ocr_client import run_google_vision_ocr
@@ -19,12 +19,6 @@ except ImportError:
 DEFAULT_FILTER_OPTIONS = {
     "maxBoxWidthRatio": 0.33,
     "maxBoxAreaRatio": 0.10,
-}
-DEFAULT_OCR_PREPROCESS_OPTIONS = {
-    "contrast": 2.0,
-    "brightness": 1.08,
-    "sharpness": 1.4,
-    "threshold": 165,
 }
 OCR_SHEET_LABEL_WIDTH = 64
 OCR_SHEET_PADDING = 16
@@ -52,17 +46,15 @@ def analyze_shelf_photo(
     image_bytes: bytes,
     include_debug: bool = False,
     filter_options: dict[str, Any] | None = None,
-    ocr_preprocess_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     display_image = _fit_image(image, max_side=1400)
     model_bytes = _image_to_jpeg_bytes(display_image)
     yolo_result = infer_book_spines(model_bytes)
     options = _normalize_filter_options(filter_options)
-    ocr_options = _normalize_ocr_preprocess_options(ocr_preprocess_options)
     yolo_regions = _regions_from_yolo_result(yolo_result, display_image.size)
     regions = _filter_regions_by_size(yolo_regions, display_image.size, options)
-    ocr_sheet, ocr_sheet_rows = _build_ocr_contact_sheet(display_image, regions, ocr_options)
+    ocr_sheet, ocr_sheet_rows = _build_ocr_contact_sheet(display_image, regions)
     if ocr_sheet_rows:
         ocr_result = run_google_vision_ocr(_image_to_png_bytes(ocr_sheet))
         ocr_rows = _map_ocr_result_to_rows(ocr_result, ocr_sheet_rows)
@@ -113,7 +105,6 @@ def analyze_shelf_photo(
             regions,
             yolo_result,
             options,
-            ocr_options,
             ocr_sheet,
             ocr_rows,
             ocr_result,
@@ -282,7 +273,6 @@ def _build_debug_payload(
     filtered_regions: list[dict[str, Any]],
     yolo_result: dict[str, Any],
     filter_options: dict[str, float],
-    ocr_options: dict[str, float],
     ocr_sheet: Image.Image,
     ocr_rows: list[dict[str, Any]],
     ocr_result: dict[str, Any],
@@ -294,7 +284,6 @@ def _build_debug_payload(
         "boxCount": len(filtered_regions),
         "filteredOutCount": len(yolo_regions) - len(filtered_regions),
         "filterOptions": filter_options,
-        "ocrPreprocessOptions": ocr_options,
         "ocrSheet": {
             "rowCount": len(ocr_rows),
             "rows": ocr_rows,
@@ -327,21 +316,9 @@ def _normalize_filter_options(options: dict[str, Any] | None) -> dict[str, float
     return normalized
 
 
-def _normalize_ocr_preprocess_options(options: dict[str, Any] | None) -> dict[str, float]:
-    normalized = dict(DEFAULT_OCR_PREPROCESS_OPTIONS)
-    if options:
-        normalized.update(options)
-    normalized["contrast"] = _clamp_float(float(normalized["contrast"]), 0.5, 4.0)
-    normalized["brightness"] = _clamp_float(float(normalized["brightness"]), 0.5, 2.0)
-    normalized["sharpness"] = _clamp_float(float(normalized["sharpness"]), 0.0, 4.0)
-    normalized["threshold"] = _clamp_float(float(normalized["threshold"]), 0.0, 255.0)
-    return normalized
-
-
 def _build_ocr_contact_sheet(
     image: Image.Image,
     regions: list[dict[str, Any]],
-    preprocess_options: dict[str, float],
 ) -> tuple[Image.Image, list[dict[str, Any]]]:
     font = ImageFont.load_default()
     rows = []
@@ -363,7 +340,6 @@ def _build_ocr_contact_sheet(
                 (max(1, int(round(crop.width * scale))), max(1, int(round(crop.height * scale)))),
                 Image.Resampling.LANCZOS,
             )
-        crop = _preprocess_ocr_crop(crop, preprocess_options)
         prepared_crops.append((index, region, crop, (x1, y1, x2 - x1, y2 - y1)))
 
     if not prepared_crops:
@@ -402,17 +378,6 @@ def _build_ocr_contact_sheet(
         y_cursor = row_y2 + OCR_SHEET_GAP
 
     return sheet, rows
-
-
-def _preprocess_ocr_crop(crop: Image.Image, options: dict[str, float]) -> Image.Image:
-    processed = ImageOps.grayscale(crop)
-    processed = ImageOps.autocontrast(processed)
-    processed = ImageEnhance.Contrast(processed).enhance(options["contrast"])
-    processed = ImageEnhance.Brightness(processed).enhance(options["brightness"])
-    processed = ImageEnhance.Sharpness(processed).enhance(options["sharpness"])
-    threshold = int(round(options["threshold"]))
-    processed = processed.point(lambda pixel: 0 if pixel < threshold else 255, mode="1")
-    return processed.convert("RGB")
 
 
 def _map_ocr_result_to_rows(

@@ -43,10 +43,6 @@ async def analyze(
     debug: bool = Form(False),
     max_box_width_ratio: float = Form(0.33),
     max_box_area_ratio: float = Form(0.10),
-    ocr_contrast: float = Form(2.0),
-    ocr_brightness: float = Form(1.08),
-    ocr_sharpness: float = Form(1.4),
-    ocr_threshold: float = Form(165),
 ) -> dict[str, Any]:
     if image.content_type and not image.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Please upload an image file.")
@@ -62,12 +58,6 @@ async def analyze(
             image_bytes,
             include_debug=debug,
             filter_options=_filter_options_from_form(max_box_width_ratio, max_box_area_ratio),
-            ocr_preprocess_options=_ocr_preprocess_options_from_form(
-                ocr_contrast,
-                ocr_brightness,
-                ocr_sharpness,
-                ocr_threshold,
-            ),
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
@@ -81,10 +71,6 @@ async def analyze_batch(
     debug: bool = Form(False),
     max_box_width_ratio: float = Form(0.33),
     max_box_area_ratio: float = Form(0.10),
-    ocr_contrast: float = Form(2.0),
-    ocr_brightness: float = Form(1.08),
-    ocr_sharpness: float = Form(1.4),
-    ocr_threshold: float = Form(165),
 ) -> dict[str, Any]:
     if not images:
         raise HTTPException(status_code=400, detail="Please upload at least one image.")
@@ -113,12 +99,6 @@ async def analyze_batch(
             item,
             debug=debug,
             filter_options=_filter_options_from_form(max_box_width_ratio, max_box_area_ratio),
-            ocr_preprocess_options=_ocr_preprocess_options_from_form(
-                ocr_contrast,
-                ocr_brightness,
-                ocr_sharpness,
-                ocr_threshold,
-            ),
         )
         for item in prepared_images
     ]
@@ -152,10 +132,6 @@ async def analyze_test_image(
     debug: bool = Form(True),
     max_box_width_ratio: float = Form(0.33),
     max_box_area_ratio: float = Form(0.10),
-    ocr_contrast: float = Form(2.0),
-    ocr_brightness: float = Form(1.08),
-    ocr_sharpness: float = Form(1.4),
-    ocr_threshold: float = Form(165),
 ) -> dict[str, Any]:
     image_path = _first_test_image()
     if image_path is None:
@@ -166,12 +142,6 @@ async def analyze_test_image(
             image_path.read_bytes(),
             include_debug=debug,
             filter_options=_filter_options_from_form(max_box_width_ratio, max_box_area_ratio),
-            ocr_preprocess_options=_ocr_preprocess_options_from_form(
-                ocr_contrast,
-                ocr_brightness,
-                ocr_sharpness,
-                ocr_threshold,
-            ),
         )
         result["summary"]["sourceImage"] = image_path.name
         return result
@@ -187,10 +157,6 @@ async def analyze_test_images(
     debug: bool = Form(True),
     max_box_width_ratio: float = Form(0.33),
     max_box_area_ratio: float = Form(0.10),
-    ocr_contrast: float = Form(2.0),
-    ocr_brightness: float = Form(1.08),
-    ocr_sharpness: float = Form(1.4),
-    ocr_threshold: float = Form(165),
 ) -> dict[str, Any]:
     selected_names = list(dict.fromkeys(image_names))
     if not selected_names:
@@ -212,12 +178,6 @@ async def analyze_test_images(
                 item,
                 debug=debug,
                 filter_options=_filter_options_from_form(max_box_width_ratio, max_box_area_ratio),
-                ocr_preprocess_options=_ocr_preprocess_options_from_form(
-                    ocr_contrast,
-                    ocr_brightness,
-                    ocr_sharpness,
-                    ocr_threshold,
-                ),
             )
             for item in prepared_images
         ]
@@ -262,7 +222,6 @@ async def _analyze_prepared_image(
     item: dict[str, Any],
     debug: bool,
     filter_options: dict[str, Any],
-    ocr_preprocess_options: dict[str, Any],
 ) -> dict[str, Any]:
     filename = item["filename"]
     if "error" in item:
@@ -274,7 +233,6 @@ async def _analyze_prepared_image(
             item["bytes"],
             include_debug=debug,
             filter_options=filter_options,
-            ocr_preprocess_options=ocr_preprocess_options,
         )
         result["summary"]["sourceImage"] = filename
         return {"filename": filename, "status": "completed", "result": result}
@@ -289,20 +247,6 @@ def _filter_options_from_form(
     return {
         "maxBoxWidthRatio": max_box_width_ratio,
         "maxBoxAreaRatio": max_box_area_ratio,
-    }
-
-
-def _ocr_preprocess_options_from_form(
-    contrast: float,
-    brightness: float,
-    sharpness: float,
-    threshold: float,
-) -> dict[str, Any]:
-    return {
-        "contrast": contrast,
-        "brightness": brightness,
-        "sharpness": sharpness,
-        "threshold": threshold,
     }
 
 
