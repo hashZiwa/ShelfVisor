@@ -14,6 +14,10 @@ except ImportError:
     from yolo_client import infer_book_spines
 
 
+MAX_BOX_WIDTH_RATIO = 0.33
+MAX_BOX_AREA_RATIO = 0.10
+
+
 @dataclass
 class Spine:
     index: int
@@ -37,7 +41,8 @@ def analyze_shelf_photo(
     display_image = _fit_image(image, max_side=1400)
     model_bytes = _image_to_jpeg_bytes(display_image)
     yolo_result = infer_book_spines(model_bytes)
-    regions = _regions_from_yolo_result(yolo_result, display_image.size)
+    yolo_regions = _regions_from_yolo_result(yolo_result, display_image.size)
+    regions = _filter_regions_by_size(yolo_regions, display_image.size)
 
     call_numbers = mock_ocr_call_numbers(len(regions))
     statuses = check_call_number_order(call_numbers)
@@ -73,7 +78,7 @@ def analyze_shelf_photo(
     }
 
     if include_debug:
-        result["debug"] = _build_debug_payload(display_image, regions, yolo_result)
+        result["debug"] = _build_debug_payload(display_image, yolo_regions, regions, yolo_result)
 
     return result
 
@@ -81,7 +86,8 @@ def analyze_shelf_photo(
 def detect_book_spines(image: Image.Image) -> list[tuple[int, int, int, int]]:
     model_bytes = _image_to_jpeg_bytes(image.convert("RGB"))
     yolo_result = infer_book_spines(model_bytes)
-    return [region["box"] for region in _regions_from_yolo_result(yolo_result, image.size)]
+    regions = _regions_from_yolo_result(yolo_result, image.size)
+    return [region["box"] for region in _filter_regions_by_size(regions, image.size)]
 
 
 def mock_ocr_call_numbers(count: int) -> list[str]:
@@ -171,6 +177,20 @@ def _regions_from_yolo_result(
     return regions[:80]
 
 
+def _filter_regions_by_size(
+    regions: list[dict[str, Any]],
+    image_size: tuple[int, int],
+) -> list[dict[str, Any]]:
+    image_width, image_height = image_size
+    max_box_width = image_width * MAX_BOX_WIDTH_RATIO
+    max_box_area = image_width * image_height * MAX_BOX_AREA_RATIO
+    return [
+        region
+        for region in regions
+        if region["box"][2] < max_box_width and region["box"][2] * region["box"][3] < max_box_area
+    ]
+
+
 def _region_from_prediction(prediction: dict[str, Any], image_width: int, image_height: int) -> dict[str, Any] | None:
     polygon = _polygon_from_prediction(prediction)
     if not polygon:
@@ -225,17 +245,24 @@ def _box_from_polygon(polygon: list[list[int]]) -> tuple[int, int, int, int]:
 def _build_debug_payload(
     image: Image.Image,
     yolo_regions: list[dict[str, Any]],
+    filtered_regions: list[dict[str, Any]],
     yolo_result: dict[str, Any],
 ) -> dict[str, Any]:
     predictions = yolo_result.get("predictions", [])
     return {
         "usedFallback": False,
         "boundaryCount": len(predictions),
-        "boxCount": len(yolo_regions),
+        "boxCount": len(filtered_regions),
+        "filteredOutCount": len(yolo_regions) - len(filtered_regions),
+        "filter": {
+            "maxBoxWidthRatio": MAX_BOX_WIDTH_RATIO,
+            "maxBoxAreaRatio": MAX_BOX_AREA_RATIO,
+        },
         "model": yolo_result.get("model_id") or "models/yolo/yolo-model-v1.pt",
         "stages": [
             _debug_stage("Original", image),
             _debug_stage("YOLO predictions", _draw_regions(image, yolo_regions, outline=(245, 158, 11, 235))),
+            _debug_stage("Size filter", _draw_regions(image, filtered_regions, outline=(43, 156, 94, 235))),
         ],
         "rawPredictionCount": len(predictions),
     }

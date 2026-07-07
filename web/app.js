@@ -389,6 +389,8 @@ function renderDebug(debug) {
 
   debugPanel.hidden = false;
   debugMeta.textContent = `Debug payload received: ${debug.boundaryCount} boundaries, ${debug.boxCount} boxes${
+    debug.filteredOutCount ? `, ${debug.filteredOutCount} filtered out` : ""
+  }${
     debug.usedFallback ? ", fallback used" : ""
   }.`;
 
