@@ -52,9 +52,9 @@ def analyze_shelf_photo(
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     display_image = _fit_image(image, max_side=1400)
     model_bytes = _image_to_jpeg_bytes(display_image)
-    roboflow_result = infer_book_spines(model_bytes)
+    yolo_result = infer_book_spines(model_bytes)
     options = _normalize_refinement_options(refinement_options)
-    yolo_regions = _regions_from_roboflow(roboflow_result, display_image.size, options["confidenceThreshold"])
+    yolo_regions = _regions_from_yolo_result(yolo_result, display_image.size, options["confidenceThreshold"])
     regions = _refine_regions_with_opencv(display_image, yolo_regions, options)
 
     call_numbers = mock_ocr_call_numbers(len(regions))
@@ -83,7 +83,7 @@ def analyze_shelf_photo(
             "bookCount": len(spines),
             "misplacedCount": len([spine for spine in spines if spine.status != "ok"]),
             "status": "needs_review" if any(spine.status != "ok" for spine in spines) else "ok",
-            "detector": "roboflow_yolo",
+            "detector": "local_yolo",
             "refinement": "opencv",
         },
         "spines": [spine.__dict__ for spine in spines],
@@ -91,16 +91,16 @@ def analyze_shelf_photo(
     }
 
     if include_debug:
-        result["debug"] = _build_debug_payload(display_image, spines, yolo_regions, roboflow_result, options)
+        result["debug"] = _build_debug_payload(display_image, spines, yolo_regions, yolo_result, options)
 
     return result
 
 
 def detect_book_spines(image: Image.Image) -> list[tuple[int, int, int, int]]:
     model_bytes = _image_to_jpeg_bytes(image.convert("RGB"))
-    roboflow_result = infer_book_spines(model_bytes)
+    yolo_result = infer_book_spines(model_bytes)
     options = _normalize_refinement_options(None)
-    regions = _regions_from_roboflow(roboflow_result, image.size, options["confidenceThreshold"])
+    regions = _regions_from_yolo_result(yolo_result, image.size, options["confidenceThreshold"])
     return [region["box"] for region in _refine_regions_with_opencv(image.convert("RGB"), regions, options)]
 
 
@@ -175,7 +175,7 @@ def image_to_data_url(image: Image.Image) -> str:
     return f"data:image/jpeg;base64,{encoded}"
 
 
-def _regions_from_roboflow(
+def _regions_from_yolo_result(
     result: dict[str, Any],
     image_size: tuple[int, int],
     confidence_threshold: float,
@@ -390,15 +390,15 @@ def _build_debug_payload(
     image: Image.Image,
     spines: list[Spine],
     yolo_regions: list[dict[str, Any]],
-    roboflow_result: dict[str, Any],
+    yolo_result: dict[str, Any],
     options: dict[str, Any],
 ) -> dict[str, Any]:
-    predictions = roboflow_result.get("predictions", [])
+    predictions = yolo_result.get("predictions", [])
     return {
         "usedFallback": False,
         "boundaryCount": len(predictions),
         "boxCount": len(spines),
-        "model": roboflow_result.get("model_id") or "book-spine-detection-2cci9/2",
+        "model": yolo_result.get("model_id") or "models/yolo/yolo-model-v1.pt",
         "stages": [
             _debug_stage("Original", image),
             _debug_stage("YOLO predictions", _draw_regions(image, yolo_regions, outline=(245, 158, 11, 235))),

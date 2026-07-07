@@ -1,59 +1,135 @@
 from __future__ import annotations
 
 import os
-import json
-import base64
+from functools import lru_cache
+from io import BytesIO
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
-ROBOFLOW_API_URL = "https://serverless.roboflow.com"
-ROBOFLOW_MODEL_ID = "book-spine-detection-2cci9/2"
+import numpy as np
+from PIL import Image
+
+
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_MODEL_PATH = ROOT / "models" / "yolo" / "yolo-model-v1.pt"
+DEFAULT_CONFIDENCE = 0.15
+DEFAULT_IMAGE_SIZE = 1024
 
 
 def infer_book_spines(image_bytes: bytes) -> dict[str, Any]:
     _load_local_env()
-    api_key = os.environ.get("ROBOFLOW_API_KEY")
-    if not api_key:
-        raise ValueError("ROBOFLOW_API_KEY is not set.")
+    image = Image.open(BytesIO(image_bytes)).convert("RGB")
+    model_path = _model_path()
+    model = _load_model(str(model_path))
+    confidence = _float_env("LOCAL_YOLO_CONFIDENCE", DEFAULT_CONFIDENCE)
+    image_size = int(_float_env("LOCAL_YOLO_IMAGE_SIZE", DEFAULT_IMAGE_SIZE))
 
-    api_url = os.environ.get("ROBOFLOW_API_URL", ROBOFLOW_API_URL).rstrip("/")
-    model_id = os.environ.get("ROBOFLOW_MODEL_ID", ROBOFLOW_MODEL_ID)
-    project_id, version = _split_model_id(model_id)
-    query = urlencode({"api_key": api_key})
-    url = f"{api_url}/{project_id}/{version}?{query}"
-    payload = base64.b64encode(image_bytes)
-    request = Request(
-        url,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+    results = model.predict(
+        source=np.asarray(image),
+        conf=confidence,
+        imgsz=image_size,
+        verbose=False,
     )
+    predictions = _predictions_from_results(results, model)
+
+    return {
+        "predictions": predictions,
+        "model_id": _display_model_path(model_path),
+        "source": "local_ultralytics",
+        "image": {"width": image.width, "height": image.height},
+    }
+
+
+@lru_cache(maxsize=1)
+def _load_model(model_path: str) -> Any:
     try:
-        with urlopen(request, timeout=45) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except HTTPError as error:
-        body = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Roboflow API error {error.code}: {_redact_api_key(body, api_key)}") from error
-    except URLError as error:
-        raise RuntimeError(f"Roboflow API connection failed: {error.reason}") from error
+        from ultralytics import YOLO
+    except ImportError as error:
+        raise RuntimeError(
+            "Local YOLO inference requires ultralytics. "
+            "Install project dependencies with `python -m pip install -r requirements.txt`."
+        ) from error
+
+    path = Path(model_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Local YOLO model not found: {path}")
+    return YOLO(str(path))
 
 
-def _split_model_id(model_id: str) -> tuple[str, str]:
-    chunks = model_id.split("/")
-    if len(chunks) != 2 or not chunks[0] or not chunks[1]:
-        raise ValueError("ROBOFLOW_MODEL_ID must look like project/version.")
-    return chunks[0], chunks[1]
+def _predictions_from_results(results: Any, model: Any) -> list[dict[str, Any]]:
+    if not results:
+        return []
+
+    result = results[0]
+    boxes = getattr(result, "boxes", None)
+    if boxes is None or len(boxes) == 0:
+        return []
+
+    names = getattr(result, "names", None) or getattr(model, "names", {}) or {}
+    xywh = boxes.xywh.cpu().numpy()
+    confidences = boxes.conf.cpu().numpy()
+    classes = boxes.cls.cpu().numpy().astype(int)
+    predictions = []
+
+    for index, (center_x, center_y, width, height) in enumerate(xywh):
+        class_index = int(classes[index])
+        confidence = float(confidences[index])
+        x1 = float(center_x - width / 2)
+        y1 = float(center_y - height / 2)
+        x2 = float(center_x + width / 2)
+        y2 = float(center_y + height / 2)
+        predictions.append(
+            {
+                "x": float(center_x),
+                "y": float(center_y),
+                "width": float(width),
+                "height": float(height),
+                "confidence": confidence,
+                "class": str(names.get(class_index, class_index)),
+                "class_id": class_index,
+                "points": [
+                    {"x": x1, "y": y1},
+                    {"x": x2, "y": y1},
+                    {"x": x2, "y": y2},
+                    {"x": x1, "y": y2},
+                ],
+            }
+        )
+
+    predictions.sort(key=lambda prediction: (prediction["x"], prediction["y"]))
+    return predictions
 
 
-def _redact_api_key(value: str, api_key: str) -> str:
-    return value.replace(api_key, "***")
+def _model_path() -> Path:
+    configured_path = os.environ.get("LOCAL_YOLO_MODEL_PATH")
+    if not configured_path:
+        return DEFAULT_MODEL_PATH
+
+    path = Path(configured_path)
+    if not path.is_absolute():
+        path = ROOT / path
+    return path
+
+
+def _display_model_path(model_path: Path) -> str:
+    try:
+        return str(model_path.relative_to(ROOT))
+    except ValueError:
+        return str(model_path)
+
+
+def _float_env(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
 
 
 def _load_local_env() -> None:
-    env_path = Path(__file__).resolve().parent.parent / ".env"
+    env_path = ROOT / ".env"
     if not env_path.exists():
         return
 
