@@ -23,23 +23,26 @@ const debugTabs = document.querySelector("#debugTabs");
 const debugImage = document.querySelector("#debugImage");
 const debugMeta = document.querySelector("#debugMeta");
 const filterControls = document.querySelector("#filterControls");
-const rerunButton = document.querySelector("#rerunButton");
+const ocrControls = document.querySelector("#ocrControls");
+const rerunButtons = Array.from(document.querySelectorAll("[data-rerun-button]"));
 const filterInputs = Array.from(document.querySelectorAll("[data-filter-param]"));
+const ocrInputs = Array.from(document.querySelectorAll("[data-ocr-param]"));
 const analysisControls = [
   imageInput,
   debugInput,
   testImageChooserButton,
   testImageSelect,
   runTestImagesButton,
-  rerunButton,
   ...filterInputs,
+  ...ocrInputs,
+  ...rerunButtons,
 ];
 const visualAnalysisControls = [
   uploadButton,
   debugToggle,
   testImageChooserButton,
   runTestImagesButton,
-  rerunButton,
+  ...rerunButtons,
 ];
 const MAX_BATCH_IMAGES = 5;
 
@@ -69,15 +72,17 @@ imageInput.addEventListener("change", () => {
   }
 });
 
-rerunButton.addEventListener("click", () => {
-  if (isAnalyzing) return;
-  if (lastRunWasTestImage && lastTestImageNames.length > 0) {
-    analyzeTestImages(lastTestImageNames);
-  } else if (lastFiles.length > 1) {
-    analyzeBatch(lastFiles);
-  } else if (lastFile) {
-    analyze(lastFile);
-  }
+rerunButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    if (isAnalyzing) return;
+    if (lastRunWasTestImage && lastTestImageNames.length > 0) {
+      analyzeTestImages(lastTestImageNames);
+    } else if (lastFiles.length > 1) {
+      analyzeBatch(lastFiles);
+    } else if (lastFile) {
+      analyze(lastFile);
+    }
+  });
 });
 
 testImageChooserButton.addEventListener("click", () => {
@@ -204,6 +209,7 @@ async function postBatchAnalysis(files) {
   });
   formData.append("debug", debugInput.checked ? "true" : "false");
   appendFilterParams(formData);
+  appendOcrParams(formData);
 
   const response = await fetch("/api/analyze-batch", {
     method: "POST",
@@ -226,6 +232,7 @@ async function postTestImageAnalysis(imageNames) {
   });
   formData.append("debug", debugInput.checked ? "true" : "false");
   appendFilterParams(formData);
+  appendOcrParams(formData);
 
   const response = await fetch("/api/analyze-test-images", {
     method: "POST",
@@ -248,6 +255,7 @@ async function postAnalysis(url, file = null) {
   }
   formData.append("debug", debugInput.checked ? "true" : "false");
   appendFilterParams(formData);
+  appendOcrParams(formData);
 
   const response = await fetch(url, {
     method: "POST",
@@ -289,6 +297,7 @@ function setLoading() {
   debugPanel.hidden = true;
   debugTabs.innerHTML = "";
   filterControls.hidden = true;
+  ocrControls.hidden = true;
   debugImage.removeAttribute("src");
 }
 
@@ -428,6 +437,9 @@ function renderDebug(debug) {
   if (debug.filterOptions) {
     syncFilterInputs(debug.filterOptions);
   }
+  if (debug.ocrPreprocessOptions) {
+    syncOcrInputs(debug.ocrPreprocessOptions);
+  }
   setDebugStage(debug, stageIndex);
   debugTabs.querySelectorAll(".debug-tab").forEach((button) => {
     button.addEventListener("click", () => {
@@ -442,6 +454,7 @@ function setDebugStage(debug, index) {
   selectedDebugStageIndex = index;
   debugImage.src = stage.image;
   filterControls.hidden = stage.label !== "Size filter";
+  ocrControls.hidden = stage.label !== "OCR contact sheet";
   debugTabs.querySelectorAll(".debug-tab").forEach((tab) => {
     const isActive = Number(tab.dataset.index) === index;
     tab.classList.toggle("active", isActive);
@@ -455,6 +468,12 @@ function appendFilterParams(formData) {
   });
 }
 
+function appendOcrParams(formData) {
+  ocrInputs.forEach((input) => {
+    formData.append(input.dataset.ocrParam, input.value);
+  });
+}
+
 function syncFilterInputs(options) {
   const mapping = {
     max_box_width_ratio: "maxBoxWidthRatio",
@@ -462,6 +481,21 @@ function syncFilterInputs(options) {
   };
   filterInputs.forEach((input) => {
     const key = mapping[input.dataset.filterParam];
+    if (key && Object.prototype.hasOwnProperty.call(options, key)) {
+      input.value = options[key];
+    }
+  });
+}
+
+function syncOcrInputs(options) {
+  const mapping = {
+    ocr_contrast: "contrast",
+    ocr_brightness: "brightness",
+    ocr_sharpness: "sharpness",
+    ocr_threshold: "threshold",
+  };
+  ocrInputs.forEach((input) => {
+    const key = mapping[input.dataset.ocrParam];
     if (key && Object.prototype.hasOwnProperty.call(options, key)) {
       input.value = options[key];
     }

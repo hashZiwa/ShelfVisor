@@ -417,7 +417,8 @@ select:disabled {
   color: var(--brand);
 }
 
-.filter-controls {
+.filter-controls,
+.ocr-controls {
   display: grid;
   gap: 12px;
   padding: 14px;
@@ -426,7 +427,8 @@ select:disabled {
   background: #f8fafc;
 }
 
-.filter-controls[hidden] {
+.filter-controls[hidden],
+.ocr-controls[hidden] {
   display: none;
 }
 
@@ -466,6 +468,59 @@ select:disabled {
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
+}
+
+.param-name {
+  width: fit-content;
+}
+
+.has-tooltip {
+  position: relative;
+  cursor: help;
+  outline: none;
+}
+
+.has-tooltip::after {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: min(260px, 72vw);
+  padding: 9px 10px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 7px;
+  background: #111827;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.18);
+  color: white;
+  content: attr(data-tooltip);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+
+.has-tooltip::before {
+  position: absolute;
+  z-index: 21;
+  left: 12px;
+  bottom: calc(100% + 2px);
+  border: 6px solid transparent;
+  border-top-color: #111827;
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.14s ease;
+}
+
+.has-tooltip:hover::after,
+.has-tooltip:focus-visible::after,
+.has-tooltip:hover::before,
+.has-tooltip:focus-visible::before {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .param-grid input {
