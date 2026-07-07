@@ -9,8 +9,10 @@ from typing import Any
 from PIL import Image, ImageDraw, ImageFont
 
 try:
+    from .ocr_client import run_google_vision_ocr
     from .yolo_client import infer_book_spines
 except ImportError:
+    from ocr_client import run_google_vision_ocr
     from yolo_client import infer_book_spines
 
 
@@ -52,8 +54,18 @@ def analyze_shelf_photo(
     options = _normalize_filter_options(filter_options)
     yolo_regions = _regions_from_yolo_result(yolo_result, display_image.size)
     regions = _filter_regions_by_size(yolo_regions, display_image.size, options)
+    ocr_sheet, ocr_sheet_rows = _build_ocr_contact_sheet(display_image, regions)
+    if ocr_sheet_rows:
+        ocr_result = run_google_vision_ocr(_image_to_png_bytes(ocr_sheet))
+        ocr_rows = _map_ocr_result_to_rows(ocr_result, ocr_sheet_rows)
+    else:
+        ocr_result = {"fullText": "", "annotations": []}
+        ocr_rows = []
 
-    call_numbers = mock_ocr_call_numbers(len(regions))
+    call_numbers = [
+        ocr_rows[index].get("text") or ""
+        for index in range(len(regions))
+    ]
     statuses = check_call_number_order(call_numbers)
 
     spines = [
@@ -87,7 +99,16 @@ def analyze_shelf_photo(
     }
 
     if include_debug:
-        result["debug"] = _build_debug_payload(display_image, yolo_regions, regions, yolo_result, options)
+        result["debug"] = _build_debug_payload(
+            display_image,
+            yolo_regions,
+            regions,
+            yolo_result,
+            options,
+            ocr_sheet,
+            ocr_rows,
+            ocr_result,
+        )
 
     return result
 
@@ -252,9 +273,11 @@ def _build_debug_payload(
     filtered_regions: list[dict[str, Any]],
     yolo_result: dict[str, Any],
     filter_options: dict[str, float],
+    ocr_sheet: Image.Image,
+    ocr_rows: list[dict[str, Any]],
+    ocr_result: dict[str, Any],
 ) -> dict[str, Any]:
     predictions = yolo_result.get("predictions", [])
-    ocr_sheet, ocr_sheet_rows = _build_ocr_contact_sheet(image, filtered_regions)
     return {
         "usedFallback": False,
         "boundaryCount": len(predictions),
@@ -262,8 +285,12 @@ def _build_debug_payload(
         "filteredOutCount": len(yolo_regions) - len(filtered_regions),
         "filterOptions": filter_options,
         "ocrSheet": {
-            "rowCount": len(ocr_sheet_rows),
-            "rows": ocr_sheet_rows,
+            "rowCount": len(ocr_rows),
+            "rows": ocr_rows,
+        },
+        "ocr": {
+            "fullText": ocr_result.get("fullText", ""),
+            "annotationCount": len(ocr_result.get("annotations", [])),
         },
         "model": yolo_result.get("model_id") or "models/yolo/yolo-model-v1.pt",
         "stages": [
@@ -353,6 +380,49 @@ def _build_ocr_contact_sheet(
     return sheet, rows
 
 
+def _map_ocr_result_to_rows(
+    ocr_result: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    mapped_rows = [
+        {
+            **row,
+            "text": "",
+            "tokens": [],
+        }
+        for row in rows
+    ]
+
+    for annotation in ocr_result.get("annotations", []):
+        box = annotation["box"]
+        center_x = box[0] + box[2] / 2
+        center_y = box[1] + box[3] / 2
+        row_index = _row_index_for_point(center_x, center_y, mapped_rows)
+        if row_index is None:
+            continue
+        mapped_rows[row_index]["tokens"].append(
+            {
+                "text": annotation["text"],
+                "box": box,
+            }
+        )
+
+    for row in mapped_rows:
+        row["tokens"].sort(key=lambda token: (token["box"][1], token["box"][0]))
+        row["text"] = " ".join(token["text"] for token in row["tokens"]).strip()
+
+    return mapped_rows
+
+
+def _row_index_for_point(x: float, y: float, rows: list[dict[str, Any]]) -> int | None:
+    for index, row in enumerate(rows):
+        sheet_x, sheet_y, sheet_width, sheet_height = row["sheetBox"]
+        margin_y = max(8, sheet_height * 0.12)
+        if sheet_x <= x <= sheet_x + sheet_width and sheet_y - margin_y <= y <= sheet_y + sheet_height + margin_y:
+            return index
+    return None
+
+
 def _draw_regions(
     image: Image.Image,
     regions: list[dict[str, Any]],
@@ -375,6 +445,12 @@ def _draw_regions(
 def _image_to_jpeg_bytes(image: Image.Image) -> bytes:
     buffer = io.BytesIO()
     image.save(buffer, format="JPEG", quality=92)
+    return buffer.getvalue()
+
+
+def _image_to_png_bytes(image: Image.Image) -> bytes:
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
     return buffer.getvalue()
 
 
