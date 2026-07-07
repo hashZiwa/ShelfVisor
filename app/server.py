@@ -41,6 +41,8 @@ def health_check() -> dict[str, str]:
 async def analyze(
     image: UploadFile = File(...),
     debug: bool = Form(False),
+    max_box_width_ratio: float = Form(0.33),
+    max_box_area_ratio: float = Form(0.10),
 ) -> dict[str, Any]:
     if image.content_type and not image.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Please upload an image file.")
@@ -55,6 +57,7 @@ async def analyze(
         return analyze_shelf_photo(
             image_bytes,
             include_debug=debug,
+            filter_options=_filter_options_from_form(max_box_width_ratio, max_box_area_ratio),
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
@@ -66,6 +69,8 @@ async def analyze(
 async def analyze_batch(
     images: list[UploadFile] = File(...),
     debug: bool = Form(False),
+    max_box_width_ratio: float = Form(0.33),
+    max_box_area_ratio: float = Form(0.10),
 ) -> dict[str, Any]:
     if not images:
         raise HTTPException(status_code=400, detail="Please upload at least one image.")
@@ -90,7 +95,11 @@ async def analyze_batch(
         prepared_images.append({"filename": filename, "bytes": image_bytes})
 
     tasks = [
-        _analyze_prepared_image(item, debug=debug)
+        _analyze_prepared_image(
+            item,
+            debug=debug,
+            filter_options=_filter_options_from_form(max_box_width_ratio, max_box_area_ratio),
+        )
         for item in prepared_images
     ]
     results = await asyncio.gather(*tasks)
@@ -121,6 +130,8 @@ def list_test_images() -> dict[str, Any]:
 @app.post("/api/analyze-test-image")
 async def analyze_test_image(
     debug: bool = Form(True),
+    max_box_width_ratio: float = Form(0.33),
+    max_box_area_ratio: float = Form(0.10),
 ) -> dict[str, Any]:
     image_path = _first_test_image()
     if image_path is None:
@@ -130,6 +141,7 @@ async def analyze_test_image(
         result = analyze_shelf_photo(
             image_path.read_bytes(),
             include_debug=debug,
+            filter_options=_filter_options_from_form(max_box_width_ratio, max_box_area_ratio),
         )
         result["summary"]["sourceImage"] = image_path.name
         return result
@@ -143,6 +155,8 @@ async def analyze_test_image(
 async def analyze_test_images(
     image_names: list[str] = Form(...),
     debug: bool = Form(True),
+    max_box_width_ratio: float = Form(0.33),
+    max_box_area_ratio: float = Form(0.10),
 ) -> dict[str, Any]:
     selected_names = list(dict.fromkeys(image_names))
     if not selected_names:
@@ -160,7 +174,11 @@ async def analyze_test_images(
 
     results = await asyncio.gather(
         *[
-            _analyze_prepared_image(item, debug=debug)
+            _analyze_prepared_image(
+                item,
+                debug=debug,
+                filter_options=_filter_options_from_form(max_box_width_ratio, max_box_area_ratio),
+            )
             for item in prepared_images
         ]
     )
@@ -203,6 +221,7 @@ def _test_image_by_name(image_name: str) -> Path | None:
 async def _analyze_prepared_image(
     item: dict[str, Any],
     debug: bool,
+    filter_options: dict[str, Any],
 ) -> dict[str, Any]:
     filename = item["filename"]
     if "error" in item:
@@ -213,11 +232,23 @@ async def _analyze_prepared_image(
             analyze_shelf_photo,
             item["bytes"],
             include_debug=debug,
+            filter_options=filter_options,
         )
         result["summary"]["sourceImage"] = filename
         return {"filename": filename, "status": "completed", "result": result}
     except Exception as error:
         return {"filename": filename, "status": "failed", "error": str(error)}
+
+
+def _filter_options_from_form(
+    max_box_width_ratio: float,
+    max_box_area_ratio: float,
+) -> dict[str, Any]:
+    return {
+        "maxBoxWidthRatio": max_box_width_ratio,
+        "maxBoxAreaRatio": max_box_area_ratio,
+    }
+
 
 @app.get("/")
 def index() -> FileResponse:

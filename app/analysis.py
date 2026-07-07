@@ -14,8 +14,10 @@ except ImportError:
     from yolo_client import infer_book_spines
 
 
-MAX_BOX_WIDTH_RATIO = 0.33
-MAX_BOX_AREA_RATIO = 0.10
+DEFAULT_FILTER_OPTIONS = {
+    "maxBoxWidthRatio": 0.33,
+    "maxBoxAreaRatio": 0.10,
+}
 
 
 @dataclass
@@ -36,13 +38,15 @@ class Spine:
 def analyze_shelf_photo(
     image_bytes: bytes,
     include_debug: bool = False,
+    filter_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     display_image = _fit_image(image, max_side=1400)
     model_bytes = _image_to_jpeg_bytes(display_image)
     yolo_result = infer_book_spines(model_bytes)
+    options = _normalize_filter_options(filter_options)
     yolo_regions = _regions_from_yolo_result(yolo_result, display_image.size)
-    regions = _filter_regions_by_size(yolo_regions, display_image.size)
+    regions = _filter_regions_by_size(yolo_regions, display_image.size, options)
 
     call_numbers = mock_ocr_call_numbers(len(regions))
     statuses = check_call_number_order(call_numbers)
@@ -78,7 +82,7 @@ def analyze_shelf_photo(
     }
 
     if include_debug:
-        result["debug"] = _build_debug_payload(display_image, yolo_regions, regions, yolo_result)
+        result["debug"] = _build_debug_payload(display_image, yolo_regions, regions, yolo_result, options)
 
     return result
 
@@ -87,7 +91,7 @@ def detect_book_spines(image: Image.Image) -> list[tuple[int, int, int, int]]:
     model_bytes = _image_to_jpeg_bytes(image.convert("RGB"))
     yolo_result = infer_book_spines(model_bytes)
     regions = _regions_from_yolo_result(yolo_result, image.size)
-    return [region["box"] for region in _filter_regions_by_size(regions, image.size)]
+    return [region["box"] for region in _filter_regions_by_size(regions, image.size, _normalize_filter_options(None))]
 
 
 def mock_ocr_call_numbers(count: int) -> list[str]:
@@ -180,10 +184,11 @@ def _regions_from_yolo_result(
 def _filter_regions_by_size(
     regions: list[dict[str, Any]],
     image_size: tuple[int, int],
+    options: dict[str, float],
 ) -> list[dict[str, Any]]:
     image_width, image_height = image_size
-    max_box_width = image_width * MAX_BOX_WIDTH_RATIO
-    max_box_area = image_width * image_height * MAX_BOX_AREA_RATIO
+    max_box_width = image_width * options["maxBoxWidthRatio"]
+    max_box_area = image_width * image_height * options["maxBoxAreaRatio"]
     return [
         region
         for region in regions
@@ -247,6 +252,7 @@ def _build_debug_payload(
     yolo_regions: list[dict[str, Any]],
     filtered_regions: list[dict[str, Any]],
     yolo_result: dict[str, Any],
+    filter_options: dict[str, float],
 ) -> dict[str, Any]:
     predictions = yolo_result.get("predictions", [])
     return {
@@ -254,10 +260,7 @@ def _build_debug_payload(
         "boundaryCount": len(predictions),
         "boxCount": len(filtered_regions),
         "filteredOutCount": len(yolo_regions) - len(filtered_regions),
-        "filter": {
-            "maxBoxWidthRatio": MAX_BOX_WIDTH_RATIO,
-            "maxBoxAreaRatio": MAX_BOX_AREA_RATIO,
-        },
+        "filterOptions": filter_options,
         "model": yolo_result.get("model_id") or "models/yolo/yolo-model-v1.pt",
         "stages": [
             _debug_stage("Original", image),
@@ -270,6 +273,15 @@ def _build_debug_payload(
 
 def _debug_stage(label: str, image: Image.Image) -> dict[str, str]:
     return {"label": label, "image": image_to_data_url(image)}
+
+
+def _normalize_filter_options(options: dict[str, Any] | None) -> dict[str, float]:
+    normalized = dict(DEFAULT_FILTER_OPTIONS)
+    if options:
+        normalized.update(options)
+    normalized["maxBoxWidthRatio"] = _clamp_float(float(normalized["maxBoxWidthRatio"]), 0.01, 1.0)
+    normalized["maxBoxAreaRatio"] = _clamp_float(float(normalized["maxBoxAreaRatio"]), 0.01, 1.0)
+    return normalized
 
 
 def _draw_regions(
@@ -315,6 +327,10 @@ def _to_optional_float(value: Any) -> float | None:
 
 
 def _clamp(value: int, minimum: int, maximum: int) -> int:
+    return max(minimum, min(maximum, value))
+
+
+def _clamp_float(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, value))
 
 

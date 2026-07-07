@@ -22,18 +22,24 @@ const debugPanel = document.querySelector("#debugPanel");
 const debugTabs = document.querySelector("#debugTabs");
 const debugImage = document.querySelector("#debugImage");
 const debugMeta = document.querySelector("#debugMeta");
+const filterControls = document.querySelector("#filterControls");
+const rerunButton = document.querySelector("#rerunButton");
+const filterInputs = Array.from(document.querySelectorAll("[data-filter-param]"));
 const analysisControls = [
   imageInput,
   debugInput,
   testImageChooserButton,
   testImageSelect,
   runTestImagesButton,
+  rerunButton,
+  ...filterInputs,
 ];
 const visualAnalysisControls = [
   uploadButton,
   debugToggle,
   testImageChooserButton,
   runTestImagesButton,
+  rerunButton,
 ];
 const MAX_BATCH_IMAGES = 5;
 
@@ -60,6 +66,17 @@ imageInput.addEventListener("change", () => {
     analyze(files[0]);
   } else if (files.length > 1) {
     analyzeBatch(files);
+  }
+});
+
+rerunButton.addEventListener("click", () => {
+  if (isAnalyzing) return;
+  if (lastRunWasTestImage && lastTestImageNames.length > 0) {
+    analyzeTestImages(lastTestImageNames);
+  } else if (lastFiles.length > 1) {
+    analyzeBatch(lastFiles);
+  } else if (lastFile) {
+    analyze(lastFile);
   }
 });
 
@@ -186,6 +203,7 @@ async function postBatchAnalysis(files) {
     formData.append("images", file);
   });
   formData.append("debug", debugInput.checked ? "true" : "false");
+  appendFilterParams(formData);
 
   const response = await fetch("/api/analyze-batch", {
     method: "POST",
@@ -207,6 +225,7 @@ async function postTestImageAnalysis(imageNames) {
     formData.append("image_names", imageName);
   });
   formData.append("debug", debugInput.checked ? "true" : "false");
+  appendFilterParams(formData);
 
   const response = await fetch("/api/analyze-test-images", {
     method: "POST",
@@ -228,6 +247,7 @@ async function postAnalysis(url, file = null) {
     formData.append("image", file);
   }
   formData.append("debug", debugInput.checked ? "true" : "false");
+  appendFilterParams(formData);
 
   const response = await fetch(url, {
     method: "POST",
@@ -268,6 +288,7 @@ function setLoading() {
   batchTabs.innerHTML = "";
   debugPanel.hidden = true;
   debugTabs.innerHTML = "";
+  filterControls.hidden = true;
   debugImage.removeAttribute("src");
 }
 
@@ -404,6 +425,9 @@ function renderDebug(debug) {
     .join("");
 
   const stageIndex = Math.min(selectedDebugStageIndex, debug.stages.length - 1);
+  if (debug.filterOptions) {
+    syncFilterInputs(debug.filterOptions);
+  }
   setDebugStage(debug, stageIndex);
   debugTabs.querySelectorAll(".debug-tab").forEach((button) => {
     button.addEventListener("click", () => {
@@ -417,10 +441,30 @@ function setDebugStage(debug, index) {
   const stage = debug.stages[index];
   selectedDebugStageIndex = index;
   debugImage.src = stage.image;
+  filterControls.hidden = stage.label !== "Size filter";
   debugTabs.querySelectorAll(".debug-tab").forEach((tab) => {
     const isActive = Number(tab.dataset.index) === index;
     tab.classList.toggle("active", isActive);
     tab.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+}
+
+function appendFilterParams(formData) {
+  filterInputs.forEach((input) => {
+    formData.append(input.dataset.filterParam, input.value);
+  });
+}
+
+function syncFilterInputs(options) {
+  const mapping = {
+    max_box_width_ratio: "maxBoxWidthRatio",
+    max_box_area_ratio: "maxBoxAreaRatio",
+  };
+  filterInputs.forEach((input) => {
+    const key = mapping[input.dataset.filterParam];
+    if (key && Object.prototype.hasOwnProperty.call(options, key)) {
+      input.value = options[key];
+    }
   });
 }
 
