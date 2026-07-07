@@ -23,6 +23,7 @@ DEFAULT_FILTER_OPTIONS = {
 OCR_SHEET_LABEL_WIDTH = 64
 OCR_SHEET_PADDING = 16
 OCR_SHEET_GAP = 18
+OCR_SHEET_COLUMN_GAP = 24
 OCR_SHEET_MIN_CROP_HEIGHT = 160
 OCR_SHEET_MAX_CROP_WIDTH = 1120
 
@@ -298,13 +299,17 @@ def _build_debug_payload(
             _debug_stage("YOLO predictions", _draw_regions(image, yolo_regions, outline=(245, 158, 11, 235))),
             _debug_stage("Size filter", _draw_regions(image, filtered_regions, outline=(43, 156, 94, 235))),
             _debug_stage("OCR contact sheet", ocr_sheet),
+            _debug_stage("OCR bounding boxes", _draw_ocr_token_overlay(ocr_sheet, ocr_rows), _build_ocr_debug_details(ocr_rows)),
         ],
         "rawPredictionCount": len(predictions),
     }
 
 
-def _debug_stage(label: str, image: Image.Image) -> dict[str, str]:
-    return {"label": label, "image": image_to_data_url(image)}
+def _debug_stage(label: str, image: Image.Image, details: list[str] | None = None) -> dict[str, Any]:
+    stage = {"label": label, "image": image_to_data_url(image)}
+    if details is not None:
+        stage["details"] = details
+    return stage
 
 
 def _normalize_filter_options(options: dict[str, Any] | None) -> dict[str, float]:
@@ -348,30 +353,68 @@ def _build_ocr_contact_sheet(
         draw.text((OCR_SHEET_PADDING, OCR_SHEET_PADDING), "No label boxes detected", fill=(17, 24, 39), font=font)
         return empty, []
 
-    content_width = max(crop.width for _index, _region, crop, _source_box in prepared_crops)
-    row_heights = [crop.height + OCR_SHEET_PADDING * 2 for _index, _region, crop, _source_box in prepared_crops]
-    sheet_width = OCR_SHEET_LABEL_WIDTH + content_width + OCR_SHEET_PADDING * 3
+    prepared_rows = []
+    for index, region, crop, source_box in prepared_crops:
+        rotated_crop = crop.rotate(90, expand=True)
+        prepared_rows.append((index, region, crop, rotated_crop, source_box))
+
+    upright_width = max(crop.width for _index, _region, crop, _rotated_crop, _source_box in prepared_rows)
+    rotated_width = max(rotated_crop.width for _index, _region, _crop, rotated_crop, _source_box in prepared_rows)
+    row_heights = [
+        max(crop.height, rotated_crop.height) + OCR_SHEET_PADDING * 2
+        for _index, _region, crop, rotated_crop, _source_box in prepared_rows
+    ]
+    sheet_width = (
+        OCR_SHEET_LABEL_WIDTH
+        + upright_width
+        + rotated_width
+        + OCR_SHEET_PADDING * 3
+        + OCR_SHEET_COLUMN_GAP
+    )
     sheet_height = sum(row_heights) + OCR_SHEET_GAP * (len(row_heights) - 1) + OCR_SHEET_PADDING * 2
     sheet = Image.new("RGB", (sheet_width, sheet_height), "white")
     draw = ImageDraw.Draw(sheet)
     y_cursor = OCR_SHEET_PADDING
 
-    for row_index, (index, region, crop, source_box) in enumerate(prepared_crops):
+    for row_index, (index, region, crop, rotated_crop, source_box) in enumerate(prepared_rows):
         row_height = row_heights[row_index]
         label = f"{index:02d}"
         row_y1 = y_cursor
         row_y2 = y_cursor + row_height
         crop_x = OCR_SHEET_LABEL_WIDTH + OCR_SHEET_PADDING * 2
-        crop_y = y_cursor + OCR_SHEET_PADDING
+        crop_y = y_cursor + OCR_SHEET_PADDING + (row_height - OCR_SHEET_PADDING * 2 - crop.height) // 2
+        rotated_x = crop_x + upright_width + OCR_SHEET_COLUMN_GAP
+        rotated_y = y_cursor + OCR_SHEET_PADDING + (row_height - OCR_SHEET_PADDING * 2 - rotated_crop.height) // 2
         sheet.paste(crop, (crop_x, crop_y))
+        sheet.paste(rotated_crop, (rotated_x, rotated_y))
         draw.rectangle((OCR_SHEET_PADDING, row_y1, OCR_SHEET_LABEL_WIDTH, row_y2), fill=(241, 245, 249))
         draw.text((OCR_SHEET_PADDING + 10, row_y1 + OCR_SHEET_PADDING), label, fill=(20, 90, 122), font=font)
         draw.rectangle((OCR_SHEET_PADDING, row_y1, sheet_width - OCR_SHEET_PADDING, row_y2), outline=(217, 222, 231), width=1)
+        draw.line(
+            (
+                rotated_x - OCR_SHEET_COLUMN_GAP // 2,
+                row_y1,
+                rotated_x - OCR_SHEET_COLUMN_GAP // 2,
+                row_y2,
+            ),
+            fill=(226, 232, 240),
+            width=1,
+        )
         rows.append(
             {
                 "index": index,
                 "sourceBox": list(source_box),
                 "sheetBox": [crop_x, crop_y, crop.width, crop.height],
+                "variants": [
+                    {
+                        "orientation": "upright",
+                        "sheetBox": [crop_x, crop_y, crop.width, crop.height],
+                    },
+                    {
+                        "orientation": "rotated_ccw_90",
+                        "sheetBox": [rotated_x, rotated_y, rotated_crop.width, rotated_crop.height],
+                    },
+                ],
                 "regionBox": list(region["box"]),
             }
         )
@@ -389,6 +432,15 @@ def _map_ocr_result_to_rows(
             **row,
             "text": "",
             "tokens": [],
+            "selectedOrientation": "upright",
+            "variantResults": [
+                {
+                    **variant,
+                    "text": "",
+                    "tokens": [],
+                }
+                for variant in row.get("variants", [])
+            ],
         }
         for row in rows
     ]
@@ -397,10 +449,10 @@ def _map_ocr_result_to_rows(
         box = annotation["box"]
         center_x = box[0] + box[2] / 2
         center_y = box[1] + box[3] / 2
-        row_index = _row_index_for_point(center_x, center_y, mapped_rows)
-        if row_index is None:
+        row_index, variant_index = _row_variant_index_for_point(center_x, center_y, mapped_rows)
+        if row_index is None or variant_index is None:
             continue
-        mapped_rows[row_index]["tokens"].append(
+        mapped_rows[row_index]["variantResults"][variant_index]["tokens"].append(
             {
                 "text": annotation["text"],
                 "box": box,
@@ -408,19 +460,109 @@ def _map_ocr_result_to_rows(
         )
 
     for row in mapped_rows:
-        row["tokens"].sort(key=lambda token: (token["box"][1], token["box"][0]))
-        row["text"] = " ".join(token["text"] for token in row["tokens"]).strip()
+        for variant in row["variantResults"]:
+            variant["tokens"].sort(key=lambda token: (token["box"][1], token["box"][0]))
+            variant["text"] = " ".join(token["text"] for token in variant["tokens"]).strip()
+        selected = max(row["variantResults"], key=lambda variant: len(variant["text"]), default=None)
+        if selected:
+            row["text"] = selected["text"]
+            row["tokens"] = selected["tokens"]
+            row["selectedOrientation"] = selected["orientation"]
 
     return mapped_rows
 
 
-def _row_index_for_point(x: float, y: float, rows: list[dict[str, Any]]) -> int | None:
-    for index, row in enumerate(rows):
+def _row_variant_index_for_point(x: float, y: float, rows: list[dict[str, Any]]) -> tuple[int | None, int | None]:
+    for row_index, row in enumerate(rows):
+        variants = row.get("variantResults") or row.get("variants") or []
+        for variant_index, variant in enumerate(variants):
+            sheet_x, sheet_y, sheet_width, sheet_height = variant["sheetBox"]
+            margin_y = max(8, sheet_height * 0.12)
+            if sheet_x <= x <= sheet_x + sheet_width and sheet_y - margin_y <= y <= sheet_y + sheet_height + margin_y:
+                return row_index, variant_index
+
         sheet_x, sheet_y, sheet_width, sheet_height = row["sheetBox"]
         margin_y = max(8, sheet_height * 0.12)
         if sheet_x <= x <= sheet_x + sheet_width and sheet_y - margin_y <= y <= sheet_y + sheet_height + margin_y:
-            return index
-    return None
+            return row_index, None
+    return None, None
+
+
+def _draw_ocr_token_overlay(image: Image.Image, rows: list[dict[str, Any]]) -> Image.Image:
+    output = image.copy()
+    draw = ImageDraw.Draw(output, "RGBA")
+    font = ImageFont.load_default()
+    variant_colors = {
+        "upright": (37, 99, 235, 235),
+        "rotated_ccw_90": (147, 51, 234, 235),
+    }
+
+    for row in rows:
+        selected_orientation = row.get("selectedOrientation")
+        for variant in row.get("variantResults", []):
+            orientation = variant.get("orientation", "unknown")
+            color = variant_colors.get(orientation, (71, 85, 105, 235))
+            x, y, width, height = variant["sheetBox"]
+            border_width = 4 if orientation == selected_orientation else 2
+            draw.rectangle((x, y, x + width, y + height), outline=color, width=border_width)
+            label = f"{row['index']:02d} {orientation}"
+            if orientation == selected_orientation:
+                label += " selected"
+            _draw_debug_label(draw, (x, max(0, y - 18)), label, color, font)
+
+            for token_index, token in enumerate(variant.get("tokens", []), start=1):
+                box_x, box_y, box_width, box_height = token["box"]
+                token_color = (14, 165, 233, 240) if orientation == selected_orientation else (168, 85, 247, 220)
+                draw.rectangle(
+                    (box_x, box_y, box_x + box_width, box_y + box_height),
+                    outline=token_color,
+                    width=2,
+                )
+                token_label = f"{token_index}. {_short_debug_text(token['text'])} [{box_x},{box_y},{box_width},{box_height}]"
+                label_y = box_y - 18 if box_y > 22 else box_y + box_height + 2
+                _draw_debug_label(draw, (box_x, label_y), token_label, token_color, font)
+
+    return output
+
+
+def _draw_debug_label(
+    draw: ImageDraw.ImageDraw,
+    position: tuple[int, int],
+    text: str,
+    color: tuple[int, int, int, int],
+    font: ImageFont.ImageFont,
+) -> None:
+    x, y = position
+    text_box = draw.textbbox((0, 0), text, font=font)
+    width = text_box[2] - text_box[0] + 8
+    height = text_box[3] - text_box[1] + 6
+    draw.rectangle((x, y, x + width, y + height), fill=(15, 23, 42, 220), outline=color, width=1)
+    draw.text((x + 4, y + 3), text, fill=(255, 255, 255, 255), font=font)
+
+
+def _build_ocr_debug_details(rows: list[dict[str, Any]]) -> list[str]:
+    details = []
+    for row in rows:
+        row_parts = []
+        for variant in row.get("variantResults", []):
+            tokens = variant.get("tokens", [])
+            token_summary = ", ".join(
+                f'"{token["text"]}" @ {token["box"]}'
+                for token in tokens
+            )
+            if not token_summary:
+                token_summary = "no tokens"
+            selected = " selected" if variant.get("orientation") == row.get("selectedOrientation") else ""
+            row_parts.append(f'{variant.get("orientation", "unknown")}{selected}: {token_summary}')
+        details.append(f'Row {row["index"]:02d}: ' + " | ".join(row_parts))
+    return details
+
+
+def _short_debug_text(value: str, max_length: int = 18) -> str:
+    clean = " ".join(value.split())
+    if len(clean) <= max_length:
+        return clean
+    return clean[: max_length - 1] + "..."
 
 
 def _draw_regions(

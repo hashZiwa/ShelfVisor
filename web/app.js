@@ -22,6 +22,7 @@ const debugPanel = document.querySelector("#debugPanel");
 const debugTabs = document.querySelector("#debugTabs");
 const debugImage = document.querySelector("#debugImage");
 const debugMeta = document.querySelector("#debugMeta");
+const debugDetails = document.querySelector("#debugDetails");
 const filterControls = document.querySelector("#filterControls");
 const rerunButton = document.querySelector("#rerunButton");
 const filterInputs = Array.from(document.querySelectorAll("[data-filter-param]"));
@@ -288,6 +289,8 @@ function setLoading() {
   batchTabs.innerHTML = "";
   debugPanel.hidden = true;
   debugTabs.innerHTML = "";
+  debugDetails.hidden = true;
+  debugDetails.innerHTML = "";
   filterControls.hidden = true;
   debugImage.removeAttribute("src");
 }
@@ -442,11 +445,24 @@ function setDebugStage(debug, index) {
   selectedDebugStageIndex = index;
   debugImage.src = stage.image;
   filterControls.hidden = stage.label !== "Size filter";
+  renderDebugDetails(stage.details || []);
   debugTabs.querySelectorAll(".debug-tab").forEach((tab) => {
     const isActive = Number(tab.dataset.index) === index;
     tab.classList.toggle("active", isActive);
     tab.setAttribute("aria-pressed", isActive ? "true" : "false");
   });
+}
+
+function renderDebugDetails(details) {
+  if (!details.length) {
+    debugDetails.hidden = true;
+    debugDetails.innerHTML = "";
+    return;
+  }
+  debugDetails.hidden = false;
+  debugDetails.innerHTML = details
+    .map((detail) => `<div>${escapeHtml(detail)}</div>`)
+    .join("");
 }
 
 function appendFilterParams(formData) {
