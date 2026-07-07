@@ -8,7 +8,6 @@ ShelfVisor는 도서관 서가 사진을 업로드하면 이미지 안의 책 �
 
 - **FastAPI**: 이미지 업로드 API와 웹 화면 제공
 - **로컬 YOLO 모델**: `models/yolo/yolo-model-v1.pt` 파일을 사용해 라벨 후보 영역 탐지
-- **OpenCV**: YOLO 결과를 기반으로 후처리 및 디버그 이미지 생성
 - **Pillow**: 이미지 변환과 결과 이미지 생성
 - **Mock OCR**: 실제 OCR 연동 전까지 임시 청구기호 생성
 - **브라우저 UI**: 사진 업로드, 테스트 이미지 실행, 결과 이미지와 디버그 단계 표시
@@ -19,7 +18,7 @@ ShelfVisor는 도서관 서가 사진을 업로드하면 이미지 안의 책 �
 2. 서버가 이미지를 적당한 크기로 축소하고 JPEG로 변환합니다.
 3. `models/yolo/yolo-model-v1.pt` 로컬 YOLO 모델로 prediction을 수행합니다.
 4. prediction의 `x`, `y`, `width`, `height`, `confidence`, `class` 값을 ShelfVisor 내부 영역 형식으로 변환합니다.
-5. OpenCV 후처리와 디버그 이미지를 생성합니다.
+5. YOLO prediction을 이미지 위에 표시한 디버그 이미지를 생성합니다.
 6. Mock OCR 청구기호와 결과 표시 이미지를 반환합니다.
 
 ## 로컬 YOLO 설정
@@ -95,5 +94,5 @@ POST /api/analyze-batch
 ## 개발 메모
 
 - 현재 추가된 로컬 YOLO 모델은 책등의 청구기호 라벨 검출 모델입니다.
-- 기존 파이프라인은 YOLO prediction을 공통 영역 형식으로 받아 후처리하므로, 라벨 검출 모델을 책등 검출 모델처럼 사용하는 경우 결과 해석이 달라질 수 있습니다.
+- 현재 파이프라인은 YOLO prediction을 바로 결과 영역으로 사용합니다.
 - 다음 단계에서는 라벨 YOLO 결과를 OCR crop 후보로 직접 넘기는 흐름과, 책등 검출 흐름을 분리하는 것이 좋습니다.

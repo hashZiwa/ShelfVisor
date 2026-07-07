@@ -41,15 +41,6 @@ def health_check() -> dict[str, str]:
 async def analyze(
     image: UploadFile = File(...),
     debug: bool = Form(False),
-    box_padding_x: float = Form(0.12),
-    box_padding_y: float = Form(0.00),
-    edge_weight: float = Form(0.45),
-    color_weight: float = Form(0.45),
-    hough_weight: float = Form(0.10),
-    search_zone_ratio: float = Form(0.34),
-    min_spine_width: int = Form(18),
-    max_skew: float = Form(0.22),
-    confidence_threshold: float = Form(0.15),
 ) -> dict[str, Any]:
     if image.content_type and not image.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Please upload an image file.")
@@ -64,17 +55,6 @@ async def analyze(
         return analyze_shelf_photo(
             image_bytes,
             include_debug=debug,
-            refinement_options=_refinement_options_from_form(
-                box_padding_x,
-                box_padding_y,
-                edge_weight,
-                color_weight,
-                hough_weight,
-                search_zone_ratio,
-                min_spine_width,
-                max_skew,
-                confidence_threshold,
-            ),
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
@@ -86,32 +66,11 @@ async def analyze(
 async def analyze_batch(
     images: list[UploadFile] = File(...),
     debug: bool = Form(False),
-    box_padding_x: float = Form(0.12),
-    box_padding_y: float = Form(0.00),
-    edge_weight: float = Form(0.45),
-    color_weight: float = Form(0.45),
-    hough_weight: float = Form(0.10),
-    search_zone_ratio: float = Form(0.34),
-    min_spine_width: int = Form(18),
-    max_skew: float = Form(0.22),
-    confidence_threshold: float = Form(0.15),
 ) -> dict[str, Any]:
     if not images:
         raise HTTPException(status_code=400, detail="Please upload at least one image.")
     if len(images) > MAX_BATCH_IMAGES:
         raise HTTPException(status_code=400, detail=f"Please upload up to {MAX_BATCH_IMAGES} images.")
-
-    options = _refinement_options_from_form(
-        box_padding_x,
-        box_padding_y,
-        edge_weight,
-        color_weight,
-        hough_weight,
-        search_zone_ratio,
-        min_spine_width,
-        max_skew,
-        confidence_threshold,
-    )
 
     prepared_images = []
     for index, image in enumerate(images):
@@ -131,7 +90,7 @@ async def analyze_batch(
         prepared_images.append({"filename": filename, "bytes": image_bytes})
 
     tasks = [
-        _analyze_prepared_image(item, debug=debug, refinement_options=options)
+        _analyze_prepared_image(item, debug=debug)
         for item in prepared_images
     ]
     results = await asyncio.gather(*tasks)
@@ -162,15 +121,6 @@ def list_test_images() -> dict[str, Any]:
 @app.post("/api/analyze-test-image")
 async def analyze_test_image(
     debug: bool = Form(True),
-    box_padding_x: float = Form(0.12),
-    box_padding_y: float = Form(0.00),
-    edge_weight: float = Form(0.45),
-    color_weight: float = Form(0.45),
-    hough_weight: float = Form(0.10),
-    search_zone_ratio: float = Form(0.34),
-    min_spine_width: int = Form(18),
-    max_skew: float = Form(0.22),
-    confidence_threshold: float = Form(0.15),
 ) -> dict[str, Any]:
     image_path = _first_test_image()
     if image_path is None:
@@ -180,17 +130,6 @@ async def analyze_test_image(
         result = analyze_shelf_photo(
             image_path.read_bytes(),
             include_debug=debug,
-            refinement_options=_refinement_options_from_form(
-                box_padding_x,
-                box_padding_y,
-                edge_weight,
-                color_weight,
-                hough_weight,
-                search_zone_ratio,
-                min_spine_width,
-                max_skew,
-                confidence_threshold,
-            ),
         )
         result["summary"]["sourceImage"] = image_path.name
         return result
@@ -204,33 +143,12 @@ async def analyze_test_image(
 async def analyze_test_images(
     image_names: list[str] = Form(...),
     debug: bool = Form(True),
-    box_padding_x: float = Form(0.12),
-    box_padding_y: float = Form(0.00),
-    edge_weight: float = Form(0.45),
-    color_weight: float = Form(0.45),
-    hough_weight: float = Form(0.10),
-    search_zone_ratio: float = Form(0.34),
-    min_spine_width: int = Form(18),
-    max_skew: float = Form(0.22),
-    confidence_threshold: float = Form(0.15),
 ) -> dict[str, Any]:
     selected_names = list(dict.fromkeys(image_names))
     if not selected_names:
         raise HTTPException(status_code=400, detail="Please select at least one test image.")
     if len(selected_names) > MAX_BATCH_IMAGES:
         raise HTTPException(status_code=400, detail=f"Please select up to {MAX_BATCH_IMAGES} test images.")
-
-    options = _refinement_options_from_form(
-        box_padding_x,
-        box_padding_y,
-        edge_weight,
-        color_weight,
-        hough_weight,
-        search_zone_ratio,
-        min_spine_width,
-        max_skew,
-        confidence_threshold,
-    )
 
     prepared_images = []
     for image_name in selected_names:
@@ -242,7 +160,7 @@ async def analyze_test_images(
 
     results = await asyncio.gather(
         *[
-            _analyze_prepared_image(item, debug=debug, refinement_options=options)
+            _analyze_prepared_image(item, debug=debug)
             for item in prepared_images
         ]
     )
@@ -285,7 +203,6 @@ def _test_image_by_name(image_name: str) -> Path | None:
 async def _analyze_prepared_image(
     item: dict[str, Any],
     debug: bool,
-    refinement_options: dict[str, Any],
 ) -> dict[str, Any]:
     filename = item["filename"]
     if "error" in item:
@@ -296,37 +213,11 @@ async def _analyze_prepared_image(
             analyze_shelf_photo,
             item["bytes"],
             include_debug=debug,
-            refinement_options=refinement_options,
         )
         result["summary"]["sourceImage"] = filename
         return {"filename": filename, "status": "completed", "result": result}
     except Exception as error:
         return {"filename": filename, "status": "failed", "error": str(error)}
-
-
-def _refinement_options_from_form(
-    box_padding_x: float,
-    box_padding_y: float,
-    edge_weight: float,
-    color_weight: float,
-    hough_weight: float,
-    search_zone_ratio: float,
-    min_spine_width: int,
-    max_skew: float,
-    confidence_threshold: float,
-) -> dict[str, Any]:
-    return {
-        "boxPaddingX": box_padding_x,
-        "boxPaddingY": box_padding_y,
-        "edgeWeight": edge_weight,
-        "colorWeight": color_weight,
-        "houghWeight": hough_weight,
-        "searchZoneRatio": search_zone_ratio,
-        "minSpineWidth": min_spine_width,
-        "maxSkew": max_skew,
-        "confidenceThreshold": confidence_threshold,
-    }
-
 
 @app.get("/")
 def index() -> FileResponse:

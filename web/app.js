@@ -22,24 +22,18 @@ const debugPanel = document.querySelector("#debugPanel");
 const debugTabs = document.querySelector("#debugTabs");
 const debugImage = document.querySelector("#debugImage");
 const debugMeta = document.querySelector("#debugMeta");
-const refinementControls = document.querySelector("#refinementControls");
-const rerunButton = document.querySelector("#rerunButton");
-const refinementInputs = Array.from(document.querySelectorAll("[data-param]"));
 const analysisControls = [
   imageInput,
   debugInput,
   testImageChooserButton,
   testImageSelect,
   runTestImagesButton,
-  rerunButton,
-  ...refinementInputs,
 ];
 const visualAnalysisControls = [
   uploadButton,
   debugToggle,
   testImageChooserButton,
   runTestImagesButton,
-  rerunButton,
 ];
 const MAX_BATCH_IMAGES = 5;
 
@@ -65,17 +59,6 @@ imageInput.addEventListener("change", () => {
     analyze(files[0]);
   } else if (files.length > 1) {
     analyzeBatch(files);
-  }
-});
-
-rerunButton.addEventListener("click", () => {
-  if (isAnalyzing) return;
-  if (lastRunWasTestImage && lastTestImageNames.length > 0) {
-    analyzeTestImages(lastTestImageNames);
-  } else if (lastFiles.length > 1) {
-    analyzeBatch(lastFiles);
-  } else if (lastFile) {
-    analyze(lastFile);
   }
 });
 
@@ -202,9 +185,6 @@ async function postBatchAnalysis(files) {
     formData.append("images", file);
   });
   formData.append("debug", debugInput.checked ? "true" : "false");
-  refinementInputs.forEach((input) => {
-    formData.append(input.dataset.param, input.value);
-  });
 
   const response = await fetch("/api/analyze-batch", {
     method: "POST",
@@ -226,9 +206,6 @@ async function postTestImageAnalysis(imageNames) {
     formData.append("image_names", imageName);
   });
   formData.append("debug", debugInput.checked ? "true" : "false");
-  refinementInputs.forEach((input) => {
-    formData.append(input.dataset.param, input.value);
-  });
 
   const response = await fetch("/api/analyze-test-images", {
     method: "POST",
@@ -250,9 +227,6 @@ async function postAnalysis(url, file = null) {
     formData.append("image", file);
   }
   formData.append("debug", debugInput.checked ? "true" : "false");
-  refinementInputs.forEach((input) => {
-    formData.append(input.dataset.param, input.value);
-  });
 
   const response = await fetch(url, {
     method: "POST",
@@ -293,7 +267,6 @@ function setLoading() {
   batchTabs.innerHTML = "";
   debugPanel.hidden = true;
   debugTabs.innerHTML = "";
-  refinementControls.hidden = true;
   debugImage.removeAttribute("src");
 }
 
@@ -441,30 +414,6 @@ function renderDebug(debug) {
 function setDebugStage(debug, index) {
   const stage = debug.stages[index];
   debugImage.src = stage.image;
-  refinementControls.hidden = stage.label !== "OpenCV refinement";
-  if (debug.refinementOptions && stage.label === "OpenCV refinement") {
-    syncRefinementInputs(debug.refinementOptions);
-  }
-}
-
-function syncRefinementInputs(options) {
-  const mapping = {
-    box_padding_x: "boxPaddingX",
-    box_padding_y: "boxPaddingY",
-    edge_weight: "edgeWeight",
-    color_weight: "colorWeight",
-    hough_weight: "houghWeight",
-    search_zone_ratio: "searchZoneRatio",
-    min_spine_width: "minSpineWidth",
-    max_skew: "maxSkew",
-    confidence_threshold: "confidenceThreshold",
-  };
-  refinementInputs.forEach((input) => {
-    const key = mapping[input.dataset.param];
-    if (key && Object.prototype.hasOwnProperty.call(options, key)) {
-      input.value = options[key];
-    }
-  });
 }
 
 function getSelectedTestImageNames() {

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ShelfVisor</title>
-    <link rel="stylesheet" href="/styles.css?v=busy2" />
+    <link rel="stylesheet" href="/styles.css?v=local2" />
   </head>
   <body>
     <main class="shell">
@@ -30,7 +30,7 @@
         </div>
 
         <div id="debugNotice" class="debug-notice" hidden>
-          Debug mode is on. The next upload will include OpenCV intermediate images.
+          Debug mode is on. The next upload will include YOLO prediction images.
         </div>
 
         <section id="testImagePanel" class="test-image-panel" hidden>
@@ -81,50 +81,6 @@
             <span id="debugMeta">Intermediate images will appear here.</span>
           </div>
           <div id="debugTabs" class="debug-tabs"></div>
-          <div id="refinementControls" class="refinement-controls" hidden>
-            <div class="refinement-header">
-              <strong>OpenCV refinement parameters</strong>
-              <button id="rerunButton" class="secondary-button" type="button">Apply and rerun</button>
-            </div>
-            <div class="param-grid">
-              <label>
-                <span>Box padding X</span>
-                <input data-param="box_padding_x" type="number" min="0" max="0.5" step="0.01" value="0.12" />
-              </label>
-              <label>
-                <span>Box padding Y</span>
-                <input data-param="box_padding_y" type="number" min="0" max="0.3" step="0.01" value="0.00" />
-              </label>
-              <label>
-                <span>Edge weight</span>
-                <input data-param="edge_weight" type="number" min="0" max="2" step="0.05" value="0.45" />
-              </label>
-              <label>
-                <span>Color weight</span>
-                <input data-param="color_weight" type="number" min="0" max="2" step="0.05" value="0.45" />
-              </label>
-              <label>
-                <span>Hough weight</span>
-                <input data-param="hough_weight" type="number" min="0" max="2" step="0.05" value="0.10" />
-              </label>
-              <label>
-                <span>Search zone ratio</span>
-                <input data-param="search_zone_ratio" type="number" min="0.15" max="0.49" step="0.01" value="0.34" />
-              </label>
-              <label>
-                <span>Min spine width</span>
-                <input data-param="min_spine_width" type="number" min="4" max="160" step="1" value="18" />
-              </label>
-              <label>
-                <span>Max skew</span>
-                <input data-param="max_skew" type="number" min="0" max="0.8" step="0.01" value="0.22" />
-              </label>
-              <label>
-                <span>Confidence threshold</span>
-                <input data-param="confidence_threshold" type="number" min="0" max="1" step="0.01" value="0.15" />
-              </label>
-            </div>
-          </div>
           <div class="debug-image-wrap">
             <img id="debugImage" alt="Debug stage" />
           </div>
@@ -139,6 +95,6 @@
         </section>
       </section>
     </main>
-    <script src="/app.js?v=busy1"></script>
+    <script src="/app.js?v=local2"></script>
   </body>
 </html>
