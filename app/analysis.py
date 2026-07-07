@@ -26,6 +26,7 @@ OCR_SHEET_GAP = 18
 OCR_SHEET_COLUMN_GAP = 24
 OCR_SHEET_MIN_CROP_HEIGHT = 160
 OCR_SHEET_MAX_CROP_WIDTH = 1120
+OCR_DEBUG_ROWS_PER_TILE = 3
 
 
 @dataclass
@@ -299,7 +300,11 @@ def _build_debug_payload(
             _debug_stage("YOLO predictions", _draw_regions(image, yolo_regions, outline=(245, 158, 11, 235))),
             _debug_stage("Size filter", _draw_regions(image, filtered_regions, outline=(43, 156, 94, 235))),
             _debug_stage("OCR contact sheet", ocr_sheet),
-            _debug_stage("OCR bounding boxes", _draw_ocr_token_overlay(ocr_sheet, ocr_rows), _build_ocr_debug_details(ocr_rows)),
+            _debug_stage(
+                "OCR bounding boxes",
+                _grid_ocr_overlay_tiles(_draw_ocr_token_overlay(ocr_sheet, ocr_rows), ocr_rows),
+                _build_ocr_debug_details(ocr_rows),
+            ),
         ],
         "rawPredictionCount": len(predictions),
     }
@@ -503,12 +508,16 @@ def _draw_ocr_token_overlay(image: Image.Image, rows: list[dict[str, Any]]) -> I
             orientation = variant.get("orientation", "unknown")
             color = variant_colors.get(orientation, (71, 85, 105, 235))
             x, y, width, height = variant["sheetBox"]
-            border_width = 4 if orientation == selected_orientation else 2
-            draw.rectangle((x, y, x + width, y + height), outline=color, width=border_width)
-            label = f"{row['index']:02d} {orientation}"
-            if orientation == selected_orientation:
-                label += " selected"
-            _draw_debug_label(draw, (x, max(0, y - 18)), label, color, font)
+            is_selected = orientation == selected_orientation
+            border_width = 6 if is_selected else 2
+            if is_selected:
+                draw.rectangle((x, y, x + width, y + height), fill=(34, 197, 94, 28))
+            draw.rectangle((x, y, x + width, y + height), outline=(34, 197, 94, 245) if is_selected else color, width=border_width)
+            orientation_label = "Original" if orientation == "upright" else "90 deg CCW"
+            status_label = "SELECTED RESULT" if is_selected else "not selected"
+            status_color = (22, 163, 74, 245) if is_selected else (100, 116, 139, 230)
+            _draw_debug_label(draw, (x, max(0, y - 22)), f"{row['index']:02d} {orientation_label}", color, font)
+            _draw_debug_label(draw, (x + 6, y + 6), status_label, status_color, font)
 
             for token_index, token in enumerate(variant.get("tokens", []), start=1):
                 box_x, box_y, box_width, box_height = token["box"]
@@ -523,6 +532,66 @@ def _draw_ocr_token_overlay(image: Image.Image, rows: list[dict[str, Any]]) -> I
                 _draw_debug_label(draw, (box_x, label_y), token_label, token_color, font)
 
     return output
+
+
+def _grid_ocr_overlay_tiles(
+    image: Image.Image,
+    rows: list[dict[str, Any]],
+    rows_per_tile: int = OCR_DEBUG_ROWS_PER_TILE,
+) -> Image.Image:
+    if not rows:
+        return image
+
+    font = ImageFont.load_default()
+    tile_gap = 24
+    outer_padding = 18
+    header_height = 28
+    row_chunks = [rows[index : index + rows_per_tile] for index in range(0, len(rows), rows_per_tile)]
+    tiles = []
+
+    for chunk in row_chunks:
+        y1, y2 = _ocr_chunk_vertical_bounds(chunk, image.height)
+        cropped = image.crop((0, y1, image.width, y2))
+        first_index = chunk[0]["index"]
+        last_index = chunk[-1]["index"]
+        tile = Image.new("RGB", (cropped.width, cropped.height + header_height), "white")
+        tile_draw = ImageDraw.Draw(tile, "RGBA")
+        tile_draw.rectangle((0, 0, tile.width, header_height), fill=(15, 23, 42, 240))
+        tile_draw.text((10, 8), f"Rows {first_index:02d}-{last_index:02d}", fill=(255, 255, 255, 255), font=font)
+        tile.paste(cropped, (0, header_height))
+        tile_draw.rectangle((0, 0, tile.width - 1, tile.height - 1), outline=(203, 213, 225, 255), width=1)
+        tiles.append(tile)
+
+    grid_width = sum(tile.width for tile in tiles) + tile_gap * (len(tiles) - 1) + outer_padding * 2
+    grid_height = max(tile.height for tile in tiles) + outer_padding * 2
+    grid = Image.new("RGB", (grid_width, grid_height), (248, 250, 252))
+    grid_draw = ImageDraw.Draw(grid)
+
+    x = outer_padding
+    for tile in tiles:
+        grid.paste(tile, (x, outer_padding))
+        x += tile.width + tile_gap
+
+    grid_draw.rectangle((0, 0, grid_width - 1, grid_height - 1), outline=(203, 213, 225), width=1)
+    return grid
+
+
+def _ocr_chunk_vertical_bounds(rows: list[dict[str, Any]], image_height: int) -> tuple[int, int]:
+    y_values = []
+    for row in rows:
+        for variant in row.get("variantResults", []):
+            _x, y, _width, height = variant["sheetBox"]
+            y_values.extend([y, y + height])
+        if "sheetBox" in row:
+            _x, y, _width, height = row["sheetBox"]
+            y_values.extend([y, y + height])
+
+    if not y_values:
+        return 0, image_height
+
+    y1 = _clamp(min(y_values) - OCR_SHEET_PADDING * 2, 0, image_height - 1)
+    y2 = _clamp(max(y_values) + OCR_SHEET_PADDING * 2, y1 + 1, image_height)
+    return y1, y2
 
 
 def _draw_debug_label(

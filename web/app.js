@@ -444,6 +444,7 @@ function setDebugStage(debug, index) {
   const stage = debug.stages[index];
   selectedDebugStageIndex = index;
   debugImage.src = stage.image;
+  debugImage.classList.toggle("wide-debug-image", stage.label === "OCR bounding boxes");
   filterControls.hidden = stage.label !== "Size filter";
   renderDebugDetails(stage.details || []);
   debugTabs.querySelectorAll(".debug-tab").forEach((tab) => {
