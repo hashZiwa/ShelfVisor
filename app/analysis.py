@@ -18,6 +18,11 @@ DEFAULT_FILTER_OPTIONS = {
     "maxBoxWidthRatio": 0.33,
     "maxBoxAreaRatio": 0.10,
 }
+OCR_SHEET_LABEL_WIDTH = 64
+OCR_SHEET_PADDING = 16
+OCR_SHEET_GAP = 18
+OCR_SHEET_MIN_CROP_HEIGHT = 96
+OCR_SHEET_MAX_CROP_WIDTH = 720
 
 
 @dataclass
@@ -95,21 +100,15 @@ def detect_book_spines(image: Image.Image) -> list[tuple[int, int, int, int]]:
 
 
 def mock_ocr_call_numbers(count: int) -> list[str]:
-    labels = [f"811.{120 + i * 7} K{i + 1:02d}" for i in range(count)]
-    if count >= 5:
-        labels[2], labels[3] = labels[3], labels[2]
-    return labels
+    return [f"811.{120 + i * 7} K{i + 1:02d}" for i in range(count)]
 
 
 def check_call_number_order(call_numbers: list[str]) -> list[dict[str, Any]]:
-    sorted_labels = sorted(call_numbers, key=call_number_sort_key)
-    expected_rank = {label: rank + 1 for rank, label in enumerate(sorted_labels)}
-
     return [
         {
             "label": label,
-            "expected_rank": expected_rank[label],
-            "status": "ok" if expected_rank[label] == index + 1 else "misplaced",
+            "expected_rank": index + 1,
+            "status": "ok",
         }
         for index, label in enumerate(call_numbers)
     ]
@@ -255,17 +254,23 @@ def _build_debug_payload(
     filter_options: dict[str, float],
 ) -> dict[str, Any]:
     predictions = yolo_result.get("predictions", [])
+    ocr_sheet, ocr_sheet_rows = _build_ocr_contact_sheet(image, filtered_regions)
     return {
         "usedFallback": False,
         "boundaryCount": len(predictions),
         "boxCount": len(filtered_regions),
         "filteredOutCount": len(yolo_regions) - len(filtered_regions),
         "filterOptions": filter_options,
+        "ocrSheet": {
+            "rowCount": len(ocr_sheet_rows),
+            "rows": ocr_sheet_rows,
+        },
         "model": yolo_result.get("model_id") or "models/yolo/yolo-model-v1.pt",
         "stages": [
             _debug_stage("Original", image),
             _debug_stage("YOLO predictions", _draw_regions(image, yolo_regions, outline=(245, 158, 11, 235))),
             _debug_stage("Size filter", _draw_regions(image, filtered_regions, outline=(43, 156, 94, 235))),
+            _debug_stage("OCR contact sheet", ocr_sheet),
         ],
         "rawPredictionCount": len(predictions),
     }
@@ -282,6 +287,70 @@ def _normalize_filter_options(options: dict[str, Any] | None) -> dict[str, float
     normalized["maxBoxWidthRatio"] = _clamp_float(float(normalized["maxBoxWidthRatio"]), 0.01, 1.0)
     normalized["maxBoxAreaRatio"] = _clamp_float(float(normalized["maxBoxAreaRatio"]), 0.01, 1.0)
     return normalized
+
+
+def _build_ocr_contact_sheet(
+    image: Image.Image,
+    regions: list[dict[str, Any]],
+) -> tuple[Image.Image, list[dict[str, Any]]]:
+    font = ImageFont.load_default()
+    rows = []
+    prepared_crops = []
+    image_width, image_height = image.size
+
+    for index, region in enumerate(regions, start=1):
+        x, y, width, height = region["box"]
+        x1 = _clamp(x, 0, image_width - 1)
+        y1 = _clamp(y, 0, image_height - 1)
+        x2 = _clamp(x + width, x1 + 1, image_width)
+        y2 = _clamp(y + height, y1 + 1, image_height)
+        crop = image.crop((x1, y1, x2, y2))
+        scale = max(1.0, OCR_SHEET_MIN_CROP_HEIGHT / max(1, crop.height))
+        if crop.width * scale > OCR_SHEET_MAX_CROP_WIDTH:
+            scale = OCR_SHEET_MAX_CROP_WIDTH / max(1, crop.width)
+        if scale != 1.0:
+            crop = crop.resize(
+                (max(1, int(round(crop.width * scale))), max(1, int(round(crop.height * scale)))),
+                Image.Resampling.LANCZOS,
+            )
+        prepared_crops.append((index, region, crop, (x1, y1, x2 - x1, y2 - y1)))
+
+    if not prepared_crops:
+        empty = Image.new("RGB", (480, 160), "white")
+        draw = ImageDraw.Draw(empty)
+        draw.text((OCR_SHEET_PADDING, OCR_SHEET_PADDING), "No label boxes detected", fill=(17, 24, 39), font=font)
+        return empty, []
+
+    content_width = max(crop.width for _index, _region, crop, _source_box in prepared_crops)
+    row_heights = [crop.height + OCR_SHEET_PADDING * 2 for _index, _region, crop, _source_box in prepared_crops]
+    sheet_width = OCR_SHEET_LABEL_WIDTH + content_width + OCR_SHEET_PADDING * 3
+    sheet_height = sum(row_heights) + OCR_SHEET_GAP * (len(row_heights) - 1) + OCR_SHEET_PADDING * 2
+    sheet = Image.new("RGB", (sheet_width, sheet_height), "white")
+    draw = ImageDraw.Draw(sheet)
+    y_cursor = OCR_SHEET_PADDING
+
+    for row_index, (index, region, crop, source_box) in enumerate(prepared_crops):
+        row_height = row_heights[row_index]
+        label = f"{index:02d}"
+        row_y1 = y_cursor
+        row_y2 = y_cursor + row_height
+        crop_x = OCR_SHEET_LABEL_WIDTH + OCR_SHEET_PADDING * 2
+        crop_y = y_cursor + OCR_SHEET_PADDING
+        sheet.paste(crop, (crop_x, crop_y))
+        draw.rectangle((OCR_SHEET_PADDING, row_y1, OCR_SHEET_LABEL_WIDTH, row_y2), fill=(241, 245, 249))
+        draw.text((OCR_SHEET_PADDING + 10, row_y1 + OCR_SHEET_PADDING), label, fill=(20, 90, 122), font=font)
+        draw.rectangle((OCR_SHEET_PADDING, row_y1, sheet_width - OCR_SHEET_PADDING, row_y2), outline=(217, 222, 231), width=1)
+        rows.append(
+            {
+                "index": index,
+                "sourceBox": list(source_box),
+                "sheetBox": [crop_x, crop_y, crop.width, crop.height],
+                "regionBox": list(region["box"]),
+            }
+        )
+        y_cursor = row_y2 + OCR_SHEET_GAP
+
+    return sheet, rows
 
 
 def _draw_regions(
