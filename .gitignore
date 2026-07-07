@@ -5,3 +5,6 @@ __pycache__/
 .env.*
 !.env.example
 .tmp-pip/
+credentials/google-vision/*
+!credentials/google-vision/.gitkeep
+!credentials/google-vision/README.md
