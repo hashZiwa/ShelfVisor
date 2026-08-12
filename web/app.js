@@ -399,7 +399,7 @@ function renderSpine(spine) {
   return `
     <article class="spine-item ${isMisplaced ? "misplaced" : ""}">
       <span class="pill ${isMisplaced ? "warn" : ""}">${statusText}</span>
-      <span class="label">${spine.index}. ${spine.call_number}</span>
+      <span class="label">${spine.call_number}</span>
       <span class="detail">Expected position ${spine.expected_rank}</span>
     </article>
   `;
