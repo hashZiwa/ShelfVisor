@@ -9,6 +9,12 @@ from .analysis_models import DetectedRegion, SpineAnalysis
 from .image_processing import clamp
 
 
+OCR_ROW_PADDING = 12
+OCR_ROW_SOURCE_PADDING = 8
+OCR_CAPTION_GAP = 4
+OCR_CAPTION_LINE_GAP = 2
+
+
 def render_result_image(image: Image.Image, spines: Sequence[SpineAnalysis]) -> Image.Image:
     output = image.copy()
     draw = ImageDraw.Draw(output, "RGBA")
@@ -84,6 +90,13 @@ def render_ocr_overlay(image: Image.Image, rows: Sequence[dict[str, Any]]) -> Im
     return output
 
 
+def _ocr_confidence_labels(tokens: Sequence[dict[str, Any]]) -> list[str]:
+    return [
+        f"box{index}: {float(token.get('confidence', 0.0) or 0.0):.2f}"
+        for index, token in enumerate(tokens, start=1)
+    ]
+
+
 def grid_ocr_overlay_tiles(
     image: Image.Image,
     rows: Sequence[dict[str, Any]],
@@ -96,9 +109,12 @@ def grid_ocr_overlay_tiles(
     tiles = []
     font = ImageFont.load_default()
     for chunk in chunks:
-        y1, y2 = _ocr_chunk_vertical_bounds(chunk, image.height)
-        cropped = image.crop((0, y1, image.width, y2))
-        tile = Image.new("RGB", (cropped.width, cropped.height + header_height), "white")
+        rendered_rows = [_render_ocr_overlay_row(image, row, font) for row in chunk]
+        content_height = (
+            sum(row.height for row in rendered_rows)
+            + OCR_ROW_PADDING * (len(rendered_rows) - 1)
+        )
+        tile = Image.new("RGB", (image.width, content_height + header_height), "white")
         draw = ImageDraw.Draw(tile, "RGBA")
         draw.rectangle((0, 0, tile.width, header_height), fill=(15, 23, 42, 240))
         draw.text(
@@ -107,7 +123,10 @@ def grid_ocr_overlay_tiles(
             fill=(255, 255, 255, 255),
             font=font,
         )
-        tile.paste(cropped, (0, header_height))
+        row_y = header_height
+        for rendered_row in rendered_rows:
+            tile.paste(rendered_row, (0, row_y))
+            row_y += rendered_row.height + OCR_ROW_PADDING
         tiles.append(tile)
     grid = Image.new(
         "RGB",
@@ -141,16 +160,55 @@ def build_ocr_debug_details(rows: Sequence[dict[str, Any]]) -> list[str]:
     return details
 
 
-def _ocr_chunk_vertical_bounds(rows: Sequence[dict[str, Any]], image_height: int) -> tuple[int, int]:
+def _render_ocr_overlay_row(
+    image: Image.Image,
+    row: dict[str, Any],
+    font: ImageFont.ImageFont,
+) -> Image.Image:
+    source_y1, source_y2 = _ocr_row_vertical_bounds(row, image.height)
+    source = image.crop((0, source_y1, image.width, source_y2))
+    captions = []
+    required_height = source.height
+    line_box = ImageDraw.Draw(Image.new("RGB", (1, 1))).textbbox(
+        (0, 0), "box1: 0.00", font=font
+    )
+    line_height = max(1, line_box[3] - line_box[1])
+    for variant in row.get("variantResults", []):
+        labels = _ocr_confidence_labels(variant.get("tokens", []))
+        if not labels:
+            continue
+        x, y, _width, height = variant["sheetBox"]
+        start_y = y + height - source_y1 + OCR_CAPTION_GAP
+        caption_bottom = (
+            start_y
+            + len(labels) * line_height
+            + (len(labels) - 1) * OCR_CAPTION_LINE_GAP
+        )
+        required_height = max(required_height, caption_bottom + OCR_ROW_PADDING)
+        captions.append((x, start_y, labels))
+    output = Image.new("RGB", (source.width, required_height), "white")
+    output.paste(source, (0, 0))
+    draw = ImageDraw.Draw(output)
+    for x, start_y, labels in captions:
+        for line_index, label in enumerate(labels):
+            draw.text(
+                (x, start_y + line_index * (line_height + OCR_CAPTION_LINE_GAP)),
+                label,
+                fill=(51, 65, 85),
+                font=font,
+            )
+    return output
+
+
+def _ocr_row_vertical_bounds(row: dict[str, Any], image_height: int) -> tuple[int, int]:
     y_values = []
-    for row in rows:
-        for variant in row.get("variantResults", []):
-            _x, y, _width, height = variant["sheetBox"]
-            y_values.extend([y, y + height])
-        if "sheetBox" in row:
-            _x, y, _width, height = row["sheetBox"]
-            y_values.extend([y, y + height])
+    for variant in row.get("variantResults", []):
+        _x, y, _width, height = variant["sheetBox"]
+        y_values.extend([y, y + height])
+    if "sheetBox" in row:
+        _x, y, _width, height = row["sheetBox"]
+        y_values.extend([y, y + height])
     if not y_values:
         return 0, image_height
-    y1 = clamp(min(y_values) - 32, 0, image_height - 1)
-    return y1, clamp(max(y_values) + 32, y1 + 1, image_height)
+    y1 = clamp(min(y_values) - OCR_ROW_SOURCE_PADDING, 0, image_height - 1)
+    return y1, clamp(max(y_values) + OCR_ROW_SOURCE_PADDING, y1 + 1, image_height)
