@@ -31,16 +31,24 @@ def analyze_shelf_photo(
     yolo_result = run_yolo_inference(image_to_jpeg_bytes(image))
     options = normalize_filter_options(filter_options)
     yolo_regions = parse_yolo_predictions(yolo_result, image.size)
-    regions = filter_yolo_regions(yolo_regions, image.size, options)
-    contact_sheet = build_ocr_contact_sheet(image, regions)
+    ocr_regions = filter_yolo_regions(yolo_regions, image.size, options)
+    contact_sheet = build_ocr_contact_sheet(image, ocr_regions)
     if contact_sheet.rows:
         ocr_result = run_ocr_inference(image_to_png_bytes(contact_sheet.image))
-        ocr_rows = map_ocr_result_to_rows(ocr_result, contact_sheet)
+        all_ocr_rows = map_ocr_result_to_rows(ocr_result, contact_sheet)
     else:
         ocr_result = {"fullText": "", "annotations": []}
-        ocr_rows = []
+        all_ocr_rows = []
 
-    call_numbers = [ocr_rows[index].get("text") or "" for index in range(len(regions))]
+    eligible_pairs = [
+        (region, row)
+        for region, row in zip(ocr_regions, all_ocr_rows)
+        if row["eligible"]
+    ]
+    regions = [region for region, _row in eligible_pairs]
+    ocr_rows = [row for _region, row in eligible_pairs]
+
+    call_numbers = [row.get("text") or "" for row in ocr_rows]
     statuses = check_call_number_order(call_numbers)
     spines = [
         SpineAnalysis(
@@ -74,23 +82,31 @@ def analyze_shelf_photo(
     collector = DebugArtifactCollector(include_debug, write_debug_artifacts)
     if include_debug:
         predictions = yolo_result.get("predictions", [])
-        ocr_overlay = grid_ocr_overlay_tiles(render_ocr_overlay(contact_sheet.image, ocr_rows), ocr_rows)
+        ocr_overlay = grid_ocr_overlay_tiles(
+            render_ocr_overlay(contact_sheet.image, all_ocr_rows),
+            all_ocr_rows,
+        )
         collector.set_metadata(
             usedFallback=False,
             boundaryCount=len(predictions),
-            boxCount=len(regions),
-            filteredOutCount=len(yolo_regions) - len(regions),
+            boxCount=len(ocr_regions),
+            filteredOutCount=len(yolo_regions) - len(ocr_regions),
             filterOptions=options,
-            ocrSheet={"rowCount": len(ocr_rows), "rows": ocr_rows},
+            ocrSheet={"rowCount": len(all_ocr_rows), "rows": all_ocr_rows},
             ocr={"fullText": ocr_result.get("fullText", ""), "annotationCount": len(ocr_result.get("annotations", []))},
             model=yolo_result.get("model_id") or "models/yolo/yolo-model-v1.pt",
             rawPredictionCount=len(predictions),
         )
         collector.add_image("original", "Original", image)
         collector.add_image("yolo-predictions", "YOLO predictions", render_yolo_regions(image, yolo_regions, (245, 158, 11, 235)))
-        collector.add_image("size-filter", "Size filter", render_yolo_regions(image, regions, (43, 156, 94, 235)))
+        collector.add_image("size-filter", "Size filter", render_yolo_regions(image, ocr_regions, (43, 156, 94, 235)))
         collector.add_image("ocr-contact-sheet", "OCR contact sheet", contact_sheet.image)
-        collector.add_image("ocr-bounding-boxes", "OCR bounding boxes", ocr_overlay, build_ocr_debug_details(ocr_rows))
+        collector.add_image(
+            "ocr-bounding-boxes",
+            "OCR bounding boxes",
+            ocr_overlay,
+            build_ocr_debug_details(all_ocr_rows),
+        )
         collector.add_image("final-result", "Final result", annotated)
         collector.write()
         result["debug"] = collector.build_payload()

@@ -73,12 +73,19 @@ def render_ocr_overlay(image: Image.Image, rows: Sequence[dict[str, Any]]) -> Im
             color = colors.get(orientation, (71, 85, 105, 235))
             x, y, width, height = variant["sheetBox"]
             is_selected = orientation == selected
+            is_rejected = variant.get("eligible") is False
             if is_selected:
                 draw.rectangle((x, y, x + width, y + height), fill=(34, 197, 94, 28))
+            border_color = (
+                (220, 38, 38, 245)
+                if is_rejected
+                else ((34, 197, 94, 245) if is_selected else color)
+            )
+            border_width = 4 if is_rejected else (6 if is_selected else 2)
             draw.rectangle(
                 (x, y, x + width, y + height),
-                outline=(34, 197, 94, 245) if is_selected else color,
-                width=6 if is_selected else 2,
+                outline=border_color,
+                width=border_width,
             )
             for token in variant.get("tokens", []):
                 box_x, box_y, box_width, box_height = token["box"]
@@ -151,12 +158,14 @@ def build_ocr_debug_details(rows: Sequence[dict[str, Any]]) -> list[str]:
                 f'"{token["text"]}" c{float(token.get("confidence", 0.0) or 0.0):.2f} @ {token["box"]}'
                 for token in tokens
             ) or "no tokens"
+            eligibility = "rejected" if variant.get("eligible") is False else "eligible"
             selected = " selected" if variant.get("orientation") == row.get("selectedOrientation") else ""
             parts.append(
-                f'{variant.get("orientation", "unknown")}{selected} '
+                f'{variant.get("orientation", "unknown")} {eligibility}{selected} '
                 f'avg {float(variant.get("averageConfidence", 0.0) or 0.0):.2f}: {token_summary}'
             )
-        details.append(f'Row {row["index"]:02d}: ' + " | ".join(parts))
+        row_status = " rejected" if row.get("eligible") is False else ""
+        details.append(f'Row {row["index"]:02d}{row_status}: ' + " | ".join(parts))
     return details
 
 

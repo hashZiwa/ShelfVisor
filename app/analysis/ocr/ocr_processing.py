@@ -14,6 +14,7 @@ GAP = 18
 COLUMN_GAP = 24
 MIN_CROP_HEIGHT = 160
 MAX_CROP_WIDTH = 1120
+MIN_OCR_TOKENS = 3
 
 
 def build_ocr_contact_sheet(image: Image.Image, regions: Sequence[DetectedRegion]) -> OCRContactSheet:
@@ -72,8 +73,13 @@ def map_ocr_result_to_rows(ocr_result: dict[str, Any], contact_sheet: OCRContact
         **row,
         "text": "",
         "tokens": [],
-        "selectedOrientation": "upright",
-        "variantResults": [{**variant, "text": "", "tokens": [], "averageConfidence": 0.0} for variant in row["variants"]],
+        "eligible": False,
+        "selectedOrientation": None,
+        "selectedAverageConfidence": 0.0,
+        "variantResults": [
+            {**variant, "text": "", "tokens": [], "averageConfidence": 0.0, "eligible": False}
+            for variant in row["variants"]
+        ],
     } for row in contact_sheet.rows]
     for annotation in ocr_result.get("annotations", []):
         box = annotation["box"]
@@ -93,9 +99,19 @@ def map_ocr_result_to_rows(ocr_result: dict[str, Any], contact_sheet: OCRContact
             variant["text"] = " ".join(token["text"] for token in variant["tokens"]).strip()
             tokens = variant["tokens"]
             variant["averageConfidence"] = sum(token["confidence"] for token in tokens) / len(tokens) if tokens else 0.0
-        selected = max(row["variantResults"], key=lambda item: item["averageConfidence"])
-        row.update(text=selected["text"], tokens=selected["tokens"], selectedOrientation=selected["orientation"])
-        row["selectedAverageConfidence"] = selected["averageConfidence"]
+            variant["eligible"] = len(tokens) >= MIN_OCR_TOKENS
+        eligible_variants = [item for item in row["variantResults"] if item["eligible"]]
+        row["eligible"] = bool(eligible_variants)
+        if eligible_variants:
+            selected = max(eligible_variants, key=lambda item: item["averageConfidence"])
+            row.update(
+                text=selected["text"],
+                tokens=selected["tokens"],
+                selectedOrientation=selected["orientation"],
+                selectedAverageConfidence=selected["averageConfidence"],
+            )
+        else:
+            row.update(text="", tokens=[], selectedOrientation=None, selectedAverageConfidence=0.0)
     return rows
 
 

@@ -2,7 +2,12 @@ import unittest
 
 from PIL import Image, ImageChops
 
-from app.analysis.result_rendering import _ocr_confidence_labels, grid_ocr_overlay_tiles
+from app.analysis.result_rendering import (
+    _ocr_confidence_labels,
+    build_ocr_debug_details,
+    grid_ocr_overlay_tiles,
+    render_ocr_overlay,
+)
 
 
 class OCRDebugRenderingTests(unittest.TestCase):
@@ -82,6 +87,33 @@ class OCRDebugRenderingTests(unittest.TestCase):
         three_lines = grid_ocr_overlay_tiles(source, [self._row([0.95, 0.87, 0.72], [])])
 
         self.assertGreater(three_lines.height, one_line.height)
+
+    def test_rejected_orientation_is_red_while_selected_orientation_stays_green(self):
+        row = self._row([0.95], [0.80, 0.81, 0.82])
+        row["selectedOrientation"] = "rotated_ccw_90"
+        row["eligible"] = True
+        row["variantResults"][0]["eligible"] = False
+        row["variantResults"][1]["eligible"] = True
+
+        rendered = render_ocr_overlay(Image.new("RGB", (200, 120), "white"), [row])
+
+        rejected_pixel = rendered.getpixel((20, 20))
+        selected_pixel = rendered.getpixel((100, 30))
+        self.assertGreater(rejected_pixel[0], rejected_pixel[1] * 2)
+        self.assertGreater(selected_pixel[1], selected_pixel[0] * 2)
+
+    def test_debug_details_label_rejected_orientation_and_row(self):
+        row = self._row([0.95], [0.63])
+        row["eligible"] = False
+        row["selectedOrientation"] = None
+        for variant in row["variantResults"]:
+            variant["eligible"] = False
+
+        detail = build_ocr_debug_details([row])[0]
+
+        self.assertIn("Row 01 rejected", detail)
+        self.assertIn("upright rejected", detail)
+        self.assertIn("rotated_ccw_90 rejected", detail)
 
 
 if __name__ == "__main__":
