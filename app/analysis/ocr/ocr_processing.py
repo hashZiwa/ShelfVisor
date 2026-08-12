@@ -89,7 +89,7 @@ def map_ocr_result_to_rows(ocr_result: dict[str, Any], contact_sheet: OCRContact
         })
     for row in rows:
         for variant in row["variantResults"]:
-            variant["tokens"].sort(key=lambda token: (token["box"][1], token["box"][0]))
+            _sort_tokens_by_average_box_shape(variant["tokens"])
             variant["text"] = " ".join(token["text"] for token in variant["tokens"]).strip()
             tokens = variant["tokens"]
             variant["averageConfidence"] = sum(token["confidence"] for token in tokens) / len(tokens) if tokens else 0.0
@@ -97,6 +97,19 @@ def map_ocr_result_to_rows(ocr_result: dict[str, Any], contact_sheet: OCRContact
         row.update(text=selected["text"], tokens=selected["tokens"], selectedOrientation=selected["orientation"])
         row["selectedAverageConfidence"] = selected["averageConfidence"]
     return rows
+
+
+def _sort_tokens_by_average_box_shape(tokens: list[dict[str, Any]]) -> None:
+    if not tokens:
+        return
+    average_width = sum(token["box"][2] for token in tokens) / len(tokens)
+    average_height = sum(token["box"][3] for token in tokens) / len(tokens)
+    key = (
+        (lambda token: (token["box"][1], token["box"][0]))
+        if average_width >= average_height
+        else (lambda token: (token["box"][0], token["box"][1]))
+    )
+    tokens.sort(key=key)
 
 
 def _find_variant(point: tuple[float, float], rows: list[dict[str, Any]]) -> tuple[int, int] | None:
