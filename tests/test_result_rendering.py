@@ -115,6 +115,30 @@ class OCRDebugRenderingTests(unittest.TestCase):
         self.assertIn("upright rejected", detail)
         self.assertIn("rotated_ccw_90 rejected", detail)
 
+    def test_debug_details_include_reconstruction_selection_metrics(self):
+        row = self._row([0.95, 0.80, 0.70], [0.63, 0.62, 0.61])
+        variant = row["variantResults"][0]
+        variant.update(
+            text="500 ㄹ 519.5 ㅅ21",
+            reconstructedText="500 519.5 ㅅ21",
+            structureScore=18,
+            discardedCharacterCount=1,
+            lowerQuartileConfidence=0.70,
+            medianConfidence=0.80,
+            averageConfidence=0.82,
+            eligible=True,
+        )
+
+        detail = build_ocr_debug_details([row])[0]
+
+        self.assertIn('raw "500 ㄹ 519.5 ㅅ21"', detail)
+        self.assertIn('parsed "500 519.5 ㅅ21"', detail)
+        self.assertIn("structure 18", detail)
+        self.assertIn("discarded 1", detail)
+        self.assertIn("low25 0.70", detail)
+        self.assertIn("median 0.80", detail)
+        self.assertIn("avg 0.82", detail)
+
 
 if __name__ == "__main__":
     unittest.main()

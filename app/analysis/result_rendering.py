@@ -160,9 +160,21 @@ def build_ocr_debug_details(rows: Sequence[dict[str, Any]]) -> list[str]:
             ) or "no tokens"
             eligibility = "rejected" if variant.get("eligible") is False else "eligible"
             selected = " selected" if variant.get("orientation") == row.get("selectedOrientation") else ""
+            raw_text = str(variant.get("text", ""))
+            reconstructed = str(variant.get("reconstructedText", raw_text))
+            score = int(variant.get("structureScore", 0) or 0)
+            discarded = int(variant.get("discardedCharacterCount", 0) or 0)
+            low25 = float(variant.get("lowerQuartileConfidence", 0.0) or 0.0)
+            median_confidence = float(variant.get("medianConfidence", 0.0) or 0.0)
+            average = float(variant.get("averageConfidence", 0.0) or 0.0)
+            candidate_summary = (
+                f'raw "{raw_text}" parsed "{reconstructed}" structure {score} '
+                f'discarded {discarded} low25 {low25:.2f} '
+                f'median {median_confidence:.2f} avg {average:.2f}'
+            )
             parts.append(
                 f'{variant.get("orientation", "unknown")} {eligibility}{selected} '
-                f'avg {float(variant.get("averageConfidence", 0.0) or 0.0):.2f}: {token_summary}'
+                f'{candidate_summary}: {token_summary}'
             )
         row_status = " rejected" if row.get("eligible") is False else ""
         details.append(f'Row {row["index"]:02d}{row_status}: ' + " | ".join(parts))
