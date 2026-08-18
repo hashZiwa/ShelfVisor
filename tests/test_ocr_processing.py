@@ -7,14 +7,14 @@ from app.analysis.ocr.ocr_processing import build_ocr_contact_sheet, map_ocr_res
 
 
 class OCRProcessingTests(unittest.TestCase):
-    def _single_variant_sheet(self):
+    def _single_variant_sheet(self, orientation="upright"):
         return OCRContactSheet(
             Image.new("RGB", (200, 200), "white"),
             [{
                 "index": 1,
                 "sourceBox": [0, 0, 100, 100],
                 "sheetBox": [0, 0, 200, 200],
-                "variants": [{"orientation": "upright", "sheetBox": [0, 0, 200, 200]}],
+                "variants": [{"orientation": orientation, "sheetBox": [0, 0, 200, 200]}],
                 "regionBox": [0, 0, 100, 100],
             }],
         )
@@ -136,6 +136,118 @@ class OCRProcessingTests(unittest.TestCase):
         self.assertIsNone(row["selectedOrientation"])
         self.assertEqual(row["tokens"], [])
         self.assertEqual(row["text"], "")
+
+    def test_horizontal_line_ignores_small_y_differences_and_reads_left_to_right(self):
+        rows = map_ocr_result_to_rows(
+            {"annotations": [
+                {"text": "right", "box": [110, 14, 40, 20], "confidence": 0.9},
+                {"text": "left", "box": [10, 10, 40, 20], "confidence": 0.9},
+                {"text": "middle", "box": [60, 18, 40, 20], "confidence": 0.9},
+            ]},
+            self._single_variant_sheet(),
+        )
+
+        self.assertEqual(
+            [token["text"] for token in rows[0]["tokens"]],
+            ["left", "middle", "right"],
+        )
+
+    def test_upright_vertical_line_ignores_small_x_differences_and_reads_down(self):
+        rows = map_ocr_result_to_rows(
+            {"annotations": [
+                {"text": "bottom", "box": [14, 110, 20, 40], "confidence": 0.9},
+                {"text": "top", "box": [10, 10, 20, 40], "confidence": 0.9},
+                {"text": "middle", "box": [18, 60, 20, 40], "confidence": 0.9},
+            ]},
+            self._single_variant_sheet("upright"),
+        )
+
+        self.assertEqual(
+            [token["text"] for token in rows[0]["tokens"]],
+            ["top", "middle", "bottom"],
+        )
+
+    def test_rotated_vertical_line_reads_from_bottom_to_top(self):
+        rows = map_ocr_result_to_rows(
+            {"annotations": [
+                {"text": "top", "box": [10, 10, 20, 40], "confidence": 0.9},
+                {"text": "bottom", "box": [14, 110, 20, 40], "confidence": 0.9},
+                {"text": "middle", "box": [18, 60, 20, 40], "confidence": 0.9},
+            ]},
+            self._single_variant_sheet("rotated_ccw_90"),
+        )
+
+        self.assertEqual(
+            [token["text"] for token in rows[0]["tokens"]],
+            ["bottom", "middle", "top"],
+        )
+
+    def test_horizontal_lines_are_ordered_top_to_bottom_then_left_to_right(self):
+        rows = map_ocr_result_to_rows(
+            {"annotations": [
+                {"text": "top-right", "box": [100, 14, 40, 20], "confidence": 0.9},
+                {"text": "bottom-right", "box": [100, 84, 40, 20], "confidence": 0.9},
+                {"text": "bottom-left", "box": [10, 80, 40, 20], "confidence": 0.9},
+                {"text": "top-left", "box": [10, 10, 40, 20], "confidence": 0.9},
+            ]},
+            self._single_variant_sheet(),
+        )
+
+        self.assertEqual(
+            [token["text"] for token in rows[0]["tokens"]],
+            ["top-left", "top-right", "bottom-left", "bottom-right"],
+        )
+
+    def test_rotated_vertical_columns_are_left_to_right_and_bottom_to_top(self):
+        rows = map_ocr_result_to_rows(
+            {"annotations": [
+                {"text": "right-top", "box": [110, 10, 20, 40], "confidence": 0.9},
+                {"text": "left-middle", "box": [14, 60, 20, 40], "confidence": 0.9},
+                {"text": "right-bottom", "box": [114, 110, 20, 40], "confidence": 0.9},
+                {"text": "left-top", "box": [10, 10, 20, 40], "confidence": 0.9},
+                {"text": "right-middle", "box": [118, 60, 20, 40], "confidence": 0.9},
+                {"text": "left-bottom", "box": [18, 110, 20, 40], "confidence": 0.9},
+            ]},
+            self._single_variant_sheet("rotated_ccw_90"),
+        )
+
+        self.assertEqual(
+            [token["text"] for token in rows[0]["tokens"]],
+            [
+                "left-bottom", "left-middle", "left-top",
+                "right-bottom", "right-middle", "right-top",
+            ],
+        )
+
+    def test_exactly_half_overlapping_intervals_share_a_horizontal_line(self):
+        rows = map_ocr_result_to_rows(
+            {"annotations": [
+                {"text": "right", "box": [110, 10, 40, 20], "confidence": 0.9},
+                {"text": "left", "box": [10, 20, 40, 20], "confidence": 0.9},
+                {"text": "middle", "box": [60, 15, 40, 20], "confidence": 0.9},
+            ]},
+            self._single_variant_sheet(),
+        )
+
+        self.assertEqual(
+            [token["text"] for token in rows[0]["tokens"]],
+            ["left", "middle", "right"],
+        )
+
+    def test_gradually_shifted_boxes_share_a_line_through_connected_overlap(self):
+        rows = map_ocr_result_to_rows(
+            {"annotations": [
+                {"text": "right", "box": [110, 10, 40, 20], "confidence": 0.9},
+                {"text": "middle", "box": [60, 20, 40, 20], "confidence": 0.9},
+                {"text": "left", "box": [10, 30, 40, 20], "confidence": 0.9},
+            ]},
+            self._single_variant_sheet(),
+        )
+
+        self.assertEqual(
+            [token["text"] for token in rows[0]["tokens"]],
+            ["left", "middle", "right"],
+        )
 
 
 if __name__ == "__main__":

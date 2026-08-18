@@ -15,6 +15,7 @@ COLUMN_GAP = 24
 MIN_CROP_HEIGHT = 160
 MAX_CROP_WIDTH = 1120
 MIN_OCR_TOKENS = 3
+LINE_OVERLAP_THRESHOLD = 0.5
 
 
 def build_ocr_contact_sheet(image: Image.Image, regions: Sequence[DetectedRegion]) -> OCRContactSheet:
@@ -95,7 +96,7 @@ def map_ocr_result_to_rows(ocr_result: dict[str, Any], contact_sheet: OCRContact
         })
     for row in rows:
         for variant in row["variantResults"]:
-            _sort_tokens_by_average_box_shape(variant["tokens"])
+            _sort_tokens_by_average_box_shape(variant["tokens"], variant["orientation"])
             variant["text"] = " ".join(token["text"] for token in variant["tokens"]).strip()
             tokens = variant["tokens"]
             variant["averageConfidence"] = sum(token["confidence"] for token in tokens) / len(tokens) if tokens else 0.0
@@ -115,17 +116,91 @@ def map_ocr_result_to_rows(ocr_result: dict[str, Any], contact_sheet: OCRContact
     return rows
 
 
-def _sort_tokens_by_average_box_shape(tokens: list[dict[str, Any]]) -> None:
+def _sort_tokens_by_average_box_shape(
+    tokens: list[dict[str, Any]],
+    orientation: str,
+) -> None:
     if not tokens:
         return
     average_width = sum(token["box"][2] for token in tokens) / len(tokens)
     average_height = sum(token["box"][3] for token in tokens) / len(tokens)
-    key = (
-        (lambda token: (token["box"][1], token["box"][0]))
-        if average_width >= average_height
-        else (lambda token: (token["box"][0], token["box"][1]))
+    is_horizontal = average_width >= average_height
+    lines = (
+        _group_tokens_by_overlap(tokens, start_index=1, length_index=3)
+        if is_horizontal
+        else _group_tokens_by_overlap(tokens, start_index=0, length_index=2)
     )
-    tokens.sort(key=key)
+    center_index, length_index = (1, 3) if is_horizontal else (0, 2)
+    lines.sort(
+        key=lambda line: sum(
+            token["box"][center_index] + token["box"][length_index] / 2
+            for token in line
+        ) / len(line)
+    )
+    for line in lines:
+        if is_horizontal:
+            line.sort(key=lambda token: (token["box"][0], token["box"][1]))
+        elif orientation == "rotated_ccw_90":
+            line.sort(key=lambda token: (-token["box"][1], token["box"][0]))
+        else:
+            line.sort(key=lambda token: (token["box"][1], token["box"][0]))
+    tokens[:] = [token for line in lines for token in line]
+
+
+def _group_tokens_by_overlap(
+    tokens: list[dict[str, Any]],
+    start_index: int,
+    length_index: int,
+) -> list[list[dict[str, Any]]]:
+    adjacency = [[] for _token in tokens]
+    for first_index in range(len(tokens)):
+        for second_index in range(first_index + 1, len(tokens)):
+            first_box = tokens[first_index]["box"]
+            second_box = tokens[second_index]["box"]
+            overlap_ratio = _interval_overlap_ratio(
+                first_box[start_index],
+                first_box[length_index],
+                second_box[start_index],
+                second_box[length_index],
+            )
+            if overlap_ratio >= LINE_OVERLAP_THRESHOLD:
+                adjacency[first_index].append(second_index)
+                adjacency[second_index].append(first_index)
+
+    groups = []
+    visited = set()
+    for start in range(len(tokens)):
+        if start in visited:
+            continue
+        stack = [start]
+        visited.add(start)
+        indexes = []
+        while stack:
+            current = stack.pop()
+            indexes.append(current)
+            for neighbor in adjacency[current]:
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    stack.append(neighbor)
+        groups.append([tokens[index] for index in indexes])
+    return groups
+
+
+def _interval_overlap_ratio(
+    first_start: float,
+    first_length: float,
+    second_start: float,
+    second_length: float,
+) -> float:
+    shorter = min(first_length, second_length)
+    if shorter <= 0:
+        return 0.0
+    overlap = max(
+        0.0,
+        min(first_start + first_length, second_start + second_length)
+        - max(first_start, second_start),
+    )
+    return overlap / shorter
 
 
 def _find_variant(point: tuple[float, float], rows: list[dict[str, Any]]) -> tuple[int, int] | None:
