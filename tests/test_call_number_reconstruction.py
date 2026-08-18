@@ -69,6 +69,25 @@ class CallNumberReconstructionTests(unittest.TestCase):
         self.assertEqual(result.text, "@@ -- ??")
         self.assertEqual(result.completed_section_count, 0)
 
+    def test_suffix_must_reach_the_end_of_the_source(self):
+        result = reconstruct_call_number(["500", "519.5", "ㅅ21", "c.2", "@"])
+
+        self.assertEqual(result.suffix, "")
+
+    def test_uppercase_suffix_marker_is_not_an_ordinary_symbol_letter(self):
+        result = reconstruct_call_number(["500", "519.5", "ㅅ21", "C2"])
+
+        self.assertNotIn("C", result.symbols)
+        self.assertEqual(result.suffix, "")
+
+    def test_long_unstructured_input_uses_fallback_without_recursion_error(self):
+        noise = "@" * 1200
+
+        result = reconstruct_call_number([noise])
+
+        self.assertEqual(result.text, noise)
+        self.assertEqual(result.completed_section_count, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

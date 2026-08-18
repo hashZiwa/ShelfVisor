@@ -196,6 +196,22 @@ class OCRProcessingTests(unittest.TestCase):
 
         self.assertIs(_select_best_variant([first, second]), first)
 
+    def test_malformed_text_and_confidence_values_are_normalized_safely(self):
+        annotations = self._variant_annotations(
+            10,
+            [500, None, "ㅅ21"],
+            ["bad", float("nan"), None],
+        )
+
+        row = map_ocr_result_to_rows({"annotations": annotations}, self._two_variant_sheet())[0]
+        variant = row["variantResults"][0]
+
+        self.assertEqual(variant["text"], "500 None ㅅ21")
+        self.assertIsNone(variant["tokens"][1]["text"])
+        self.assertEqual(variant["lowerQuartileConfidence"], 0.0)
+        self.assertEqual(variant["medianConfidence"], 0.0)
+        self.assertEqual(variant["averageConfidence"], 0.0)
+
     def test_row_is_rejected_when_both_orientations_have_at_most_two_tokens(self):
         annotations = [
             {"text": f"u{i}", "box": [10, 10 + i * 20, 30, 10], "confidence": 0.9}

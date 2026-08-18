@@ -17,6 +17,7 @@ ADDITIONAL_SYMBOL_SCORE = 2
 SUFFIX_SCORE = 2
 DISCARDED_CHARACTER_SCORE = -1
 NUMERIC_SYMBOL_RUN_SCORE = -6
+MAX_RECONSTRUCTION_CHARACTERS = 256
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,19 @@ def reconstruct_call_number(token_texts: Sequence[object]) -> ReconstructionResu
     raw_parts = [" ".join(str(text).split()) for text in token_texts if str(text).strip()]
     characters = tuple(character for part in raw_parts for character in part if not character.isspace())
     length = len(characters)
+    if length > MAX_RECONSTRUCTION_CHARACTERS:
+        missing_score = MAJOR_MISSING_SCORE + DETAIL_MISSING_SCORE + MISSING_SYMBOL_SCORE
+        return ReconstructionResult(
+            text=" ".join(raw_parts),
+            major="",
+            detail="",
+            symbols="",
+            suffix="",
+            structure_score=missing_score + length * DISCARDED_CHARACTER_SCORE,
+            retained_positions=(),
+            discarded_character_count=length,
+            completed_section_count=0,
+        )
 
     @lru_cache(maxsize=None)
     def consecutive_digit_count(index: int) -> int:
@@ -74,13 +88,14 @@ def reconstruct_call_number(token_texts: Sequence[object]) -> ReconstructionResu
         options: list[_ParsePath | None] = []
         if progress == 0:
             options.append(done(index))
-        elif progress == 3:
-            options.append(_add_score(done(index), SUFFIX_SCORE))
+        elif progress == 3 and index >= length:
+            options.append(_add_score(_ParsePath(), SUFFIX_SCORE))
         if index >= length:
             return _best(options)
 
         character = characters[index]
-        options.append(_discard(suffix(index + 1, progress)))
+        if progress != 3:
+            options.append(_discard(suffix(index + 1, progress)))
         if progress == 0 and character.lower() in {"v", "c"}:
             options.append(_prepend(suffix(index + 1, 1), "suffix", character.lower(), index))
         elif progress == 1 and character == ".":
@@ -150,12 +165,12 @@ def reconstruct_call_number(token_texts: Sequence[object]) -> ReconstructionResu
             )
         )
 
-        if mode == "start" and character.isalpha():
+        if mode == "start" and _is_symbol_letter(character):
             options.append(
                 _prepend(symbols(index + 1, "letters", 0, False, False), "symbols", character, index)
             )
         elif mode == "letters":
-            if character.isalpha():
+            if _is_symbol_letter(character):
                 options.append(
                     _prepend(
                         symbols(index + 1, "letters", 0, has_completed_group, False),
@@ -183,7 +198,7 @@ def reconstruct_call_number(token_texts: Sequence[object]) -> ReconstructionResu
                         index,
                     )
                 )
-            elif character.isalpha():
+            elif _is_symbol_letter(character):
                 continued = close_symbol_group(
                     symbols(index + 1, "letters", 0, True, False),
                     has_completed_group,
@@ -307,6 +322,10 @@ def _format_sections(path: _ParsePath) -> str:
         for section in (path.major, path.detail, path.symbols, path.suffix)
         if section
     )
+
+
+def _is_symbol_letter(character: str) -> bool:
+    return character.isalpha() and character not in {"V", "C"}
 
 
 def _path_rank(path: _ParsePath) -> tuple[object, ...]:

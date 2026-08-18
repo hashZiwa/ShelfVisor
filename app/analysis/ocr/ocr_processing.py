@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from math import ceil
+from math import ceil, isfinite
 from statistics import median
 from typing import Any, Sequence
 
@@ -105,14 +105,14 @@ def map_ocr_result_to_rows(ocr_result: dict[str, Any], contact_sheet: OCRContact
             continue
         row_index, variant_index = location
         rows[row_index]["variantResults"][variant_index]["tokens"].append({
-            "text": annotation["text"],
+            "text": annotation.get("text", ""),
             "box": box,
-            "confidence": float(annotation.get("confidence", 0.0) or 0.0),
+            "confidence": _normalized_confidence(annotation.get("confidence", 0.0)),
         })
     for row in rows:
         for variant in row["variantResults"]:
             _sort_tokens_by_average_box_shape(variant["tokens"], variant["orientation"])
-            variant["text"] = " ".join(token["text"] for token in variant["tokens"]).strip()
+            variant["text"] = " ".join(str(token.get("text", "")) for token in variant["tokens"]).strip()
             tokens = variant["tokens"]
             reconstruction = reconstruct_call_number([token["text"] for token in tokens])
             lower_quartile, median_confidence, average_confidence = _confidence_statistics(tokens)
@@ -143,12 +143,20 @@ def map_ocr_result_to_rows(ocr_result: dict[str, Any], contact_sheet: OCRContact
 def _confidence_statistics(
     tokens: Sequence[dict[str, Any]],
 ) -> tuple[float, float, float]:
-    values = sorted(float(token.get("confidence", 0.0) or 0.0) for token in tokens)
+    values = sorted(_normalized_confidence(token.get("confidence", 0.0)) for token in tokens)
     if not values:
         return 0.0, 0.0, 0.0
     lower_count = max(1, ceil(len(values) * 0.25))
     lower_quartile = sum(values[:lower_count]) / lower_count
     return lower_quartile, float(median(values)), sum(values) / len(values)
+
+
+def _normalized_confidence(value: Any) -> float:
+    try:
+        normalized = float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return normalized if isfinite(normalized) else 0.0
 
 
 def _select_best_variant(
