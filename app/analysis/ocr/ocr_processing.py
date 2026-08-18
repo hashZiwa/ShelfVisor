@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from math import ceil
+from statistics import median
 from typing import Any, Sequence
 
 from PIL import Image, ImageDraw, ImageFont
 
 from ..analysis_models import DetectedRegion, OCRContactSheet
 from ..image_processing import clamp
+from .call_number_reconstruction import reconstruct_call_number
 
 
 LABEL_WIDTH = 64
@@ -16,6 +19,7 @@ MIN_CROP_HEIGHT = 160
 MAX_CROP_WIDTH = 1120
 MIN_OCR_TOKENS = 3
 LINE_OVERLAP_THRESHOLD = 0.5
+STRUCTURE_NEAR_TIE_MARGIN = 2
 
 
 def build_ocr_contact_sheet(image: Image.Image, regions: Sequence[DetectedRegion]) -> OCRContactSheet:
@@ -78,7 +82,18 @@ def map_ocr_result_to_rows(ocr_result: dict[str, Any], contact_sheet: OCRContact
         "selectedOrientation": None,
         "selectedAverageConfidence": 0.0,
         "variantResults": [
-            {**variant, "text": "", "tokens": [], "averageConfidence": 0.0, "eligible": False}
+            {
+                **variant,
+                "text": "",
+                "tokens": [],
+                "reconstructedText": "",
+                "structureScore": 0,
+                "discardedCharacterCount": 0,
+                "lowerQuartileConfidence": 0.0,
+                "medianConfidence": 0.0,
+                "averageConfidence": 0.0,
+                "eligible": False,
+            }
             for variant in row["variants"]
         ],
     } for row in contact_sheet.rows]
@@ -99,14 +114,23 @@ def map_ocr_result_to_rows(ocr_result: dict[str, Any], contact_sheet: OCRContact
             _sort_tokens_by_average_box_shape(variant["tokens"], variant["orientation"])
             variant["text"] = " ".join(token["text"] for token in variant["tokens"]).strip()
             tokens = variant["tokens"]
-            variant["averageConfidence"] = sum(token["confidence"] for token in tokens) / len(tokens) if tokens else 0.0
-            variant["eligible"] = len(tokens) >= MIN_OCR_TOKENS
+            reconstruction = reconstruct_call_number([token["text"] for token in tokens])
+            lower_quartile, median_confidence, average_confidence = _confidence_statistics(tokens)
+            variant.update(
+                reconstructedText=reconstruction.text,
+                structureScore=reconstruction.structure_score,
+                discardedCharacterCount=reconstruction.discarded_character_count,
+                lowerQuartileConfidence=lower_quartile,
+                medianConfidence=median_confidence,
+                averageConfidence=average_confidence,
+                eligible=len(tokens) >= MIN_OCR_TOKENS,
+            )
         eligible_variants = [item for item in row["variantResults"] if item["eligible"]]
         row["eligible"] = bool(eligible_variants)
         if eligible_variants:
-            selected = max(eligible_variants, key=lambda item: item["averageConfidence"])
+            selected = _select_best_variant(eligible_variants)
             row.update(
-                text=selected["text"],
+                text=selected["reconstructedText"],
                 tokens=selected["tokens"],
                 selectedOrientation=selected["orientation"],
                 selectedAverageConfidence=selected["averageConfidence"],
@@ -114,6 +138,40 @@ def map_ocr_result_to_rows(ocr_result: dict[str, Any], contact_sheet: OCRContact
         else:
             row.update(text="", tokens=[], selectedOrientation=None, selectedAverageConfidence=0.0)
     return rows
+
+
+def _confidence_statistics(
+    tokens: Sequence[dict[str, Any]],
+) -> tuple[float, float, float]:
+    values = sorted(float(token.get("confidence", 0.0) or 0.0) for token in tokens)
+    if not values:
+        return 0.0, 0.0, 0.0
+    lower_count = max(1, ceil(len(values) * 0.25))
+    lower_quartile = sum(values[:lower_count]) / lower_count
+    return lower_quartile, float(median(values)), sum(values) / len(values)
+
+
+def _select_best_variant(
+    eligible_variants: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    selected = eligible_variants[0]
+    for candidate in eligible_variants[1:]:
+        score_difference = candidate["structureScore"] - selected["structureScore"]
+        if abs(score_difference) > STRUCTURE_NEAR_TIE_MARGIN:
+            if score_difference > 0:
+                selected = candidate
+            continue
+        for key in (
+            "lowerQuartileConfidence",
+            "medianConfidence",
+            "averageConfidence",
+        ):
+            if candidate[key] > selected[key]:
+                selected = candidate
+                break
+            if candidate[key] < selected[key]:
+                break
+    return selected
 
 
 def _sort_tokens_by_average_box_shape(

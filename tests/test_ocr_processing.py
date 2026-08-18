@@ -3,7 +3,11 @@ import unittest
 from PIL import Image
 
 from app.analysis.analysis_models import DetectedRegion, OCRContactSheet
-from app.analysis.ocr.ocr_processing import build_ocr_contact_sheet, map_ocr_result_to_rows
+from app.analysis.ocr.ocr_processing import (
+    _select_best_variant,
+    build_ocr_contact_sheet,
+    map_ocr_result_to_rows,
+)
 
 
 class OCRProcessingTests(unittest.TestCase):
@@ -34,6 +38,24 @@ class OCRProcessingTests(unittest.TestCase):
             }],
         )
 
+    def _variant_annotations(self, x, texts, confidences):
+        return [
+            {
+                "text": text,
+                "box": [x, 10 + index * 20, 30, 10],
+                "confidence": confidence,
+            }
+            for index, (text, confidence) in enumerate(zip(texts, confidences))
+        ]
+
+    def _ranked_variant(self, structure, lower_quartile, median_value, average):
+        return {
+            "structureScore": structure,
+            "lowerQuartileConfidence": lower_quartile,
+            "medianConfidence": median_value,
+            "averageConfidence": average,
+        }
+
     def test_contact_sheet_contains_both_orientations(self):
         region = DetectedRegion((10, 10, 20, 60), [[10, 10], [30, 10], [30, 70], [10, 70]])
         sheet = build_ocr_contact_sheet(Image.new("RGB", (100, 100), "white"), [region])
@@ -51,7 +73,8 @@ class OCRProcessingTests(unittest.TestCase):
             ]},
             sheet,
         )
-        self.assertEqual(rows[0]["text"], "811.1 A 2")
+        self.assertEqual(rows[0]["text"], "811.1 A2")
+        self.assertEqual(rows[0]["variantResults"][0]["text"], "811.1 A 2")
         self.assertEqual(rows[0]["selectedOrientation"], "upright")
 
     def test_wide_tokens_are_sorted_top_to_bottom(self):
@@ -65,7 +88,7 @@ class OCRProcessingTests(unittest.TestCase):
         )
 
         self.assertEqual([token["text"] for token in rows[0]["tokens"]], ["top", "middle", "bottom"])
-        self.assertEqual(rows[0]["text"], "top middle bottom")
+        self.assertEqual(rows[0]["variantResults"][0]["text"], "top middle bottom")
 
     def test_tall_tokens_are_sorted_left_to_right(self):
         rows = map_ocr_result_to_rows(
@@ -78,7 +101,7 @@ class OCRProcessingTests(unittest.TestCase):
         )
 
         self.assertEqual([token["text"] for token in rows[0]["tokens"]], ["left", "middle", "right"])
-        self.assertEqual(rows[0]["text"], "left middle right")
+        self.assertEqual(rows[0]["variantResults"][0]["text"], "left middle right")
 
     def test_equal_average_width_and_height_sort_top_to_bottom(self):
         rows = map_ocr_result_to_rows(
@@ -91,7 +114,7 @@ class OCRProcessingTests(unittest.TestCase):
         )
 
         self.assertEqual([token["text"] for token in rows[0]["tokens"]], ["top", "middle", "bottom"])
-        self.assertEqual(rows[0]["text"], "top middle bottom")
+        self.assertEqual(rows[0]["variantResults"][0]["text"], "top middle bottom")
 
     def test_only_orientation_with_at_least_three_tokens_can_be_selected(self):
         annotations = [
@@ -108,18 +131,70 @@ class OCRProcessingTests(unittest.TestCase):
         self.assertEqual(row["selectedOrientation"], "upright")
         self.assertEqual([variant["eligible"] for variant in row["variantResults"]], [True, False])
 
-    def test_two_eligible_orientations_still_select_higher_average_confidence(self):
-        annotations = [
-            {"text": f"u{i}", "box": [10, 10 + i * 20, 30, 10], "confidence": 0.6}
-            for i in range(3)
-        ] + [
-            {"text": f"r{i}", "box": [120, 10 + i * 20, 30, 10], "confidence": 0.9}
-            for i in range(3)
-        ]
+    def test_better_structure_beats_higher_average_confidence(self):
+        annotations = self._variant_annotations(
+            10, ["500", "519.5", "ㅅ21"], [0.60, 0.60, 0.60]
+        ) + self._variant_annotations(
+            120, ["noise", "words", "only"], [0.99, 0.99, 0.99]
+        )
 
         row = map_ocr_result_to_rows({"annotations": annotations}, self._two_variant_sheet())[0]
 
-        self.assertEqual(row["selectedOrientation"], "rotated_ccw_90")
+        self.assertEqual(row["selectedOrientation"], "upright")
+        self.assertEqual(row["text"], "500 519.5 ㅅ21")
+        self.assertEqual(row["variantResults"][0]["text"], "500 519.5 ㅅ21")
+
+    def test_discarded_noise_still_affects_confidence_statistics(self):
+        annotations = self._variant_annotations(
+            10, ["500", "ㄹ", "519.5", "ㅅ21"], [0.90, 0.10, 0.90, 0.90]
+        )
+
+        row = map_ocr_result_to_rows({"annotations": annotations}, self._two_variant_sheet())[0]
+        variant = row["variantResults"][0]
+
+        self.assertEqual(variant["reconstructedText"], "500 519.5 ㅅ21")
+        self.assertAlmostEqual(variant["lowerQuartileConfidence"], 0.10)
+        self.assertAlmostEqual(variant["medianConfidence"], 0.90)
+        self.assertAlmostEqual(variant["averageConfidence"], 0.70)
+
+    def test_structure_difference_above_margin_wins(self):
+        lower_structure = self._ranked_variant(10, 0.99, 0.99, 0.99)
+        higher_structure = self._ranked_variant(13, 0.10, 0.10, 0.10)
+
+        self.assertIs(
+            _select_best_variant([lower_structure, higher_structure]),
+            higher_structure,
+        )
+
+    def test_near_tie_uses_lower_quartile_before_median(self):
+        better_median = self._ranked_variant(10, 0.40, 0.95, 0.95)
+        better_low = self._ranked_variant(12, 0.50, 0.50, 0.50)
+
+        self.assertIs(
+            _select_best_variant([better_median, better_low]),
+            better_low,
+        )
+
+    def test_lower_quartile_tie_uses_median_before_average(self):
+        better_average = self._ranked_variant(10, 0.40, 0.50, 0.99)
+        better_median = self._ranked_variant(10, 0.40, 0.60, 0.60)
+
+        self.assertIs(
+            _select_best_variant([better_average, better_median]),
+            better_median,
+        )
+
+    def test_median_tie_uses_average(self):
+        first = self._ranked_variant(10, 0.40, 0.60, 0.70)
+        second = self._ranked_variant(10, 0.40, 0.60, 0.80)
+
+        self.assertIs(_select_best_variant([first, second]), second)
+
+    def test_complete_tie_preserves_first_variant(self):
+        first = self._ranked_variant(10, 0.40, 0.60, 0.80)
+        second = self._ranked_variant(10, 0.40, 0.60, 0.80)
+
+        self.assertIs(_select_best_variant([first, second]), first)
 
     def test_row_is_rejected_when_both_orientations_have_at_most_two_tokens(self):
         annotations = [
