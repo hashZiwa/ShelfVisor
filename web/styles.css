@@ -383,10 +383,6 @@ select:disabled {
   padding: 18px;
 }
 
-.text-detection-panel[hidden] {
-  display: none;
-}
-
 .debug-panel {
   display: grid;
   gap: 14px;
@@ -564,17 +560,6 @@ select:disabled {
 .spine-item .detail {
   color: var(--muted);
   font-size: 13px;
-}
-
-.text-detection-item {
-  min-height: 118px;
-}
-
-.text-detection-raw {
-  overflow-wrap: anywhere;
-  font-family: Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
-  line-height: 1.45;
 }
 
 .pill {

@@ -34,17 +34,10 @@ class DebugArtifactCollector:
         label: str,
         image: Image.Image,
         details: list[str] | None = None,
-        number: str | None = None,
     ) -> None:
         if not self.enabled:
             return
-        self._stages.append({
-            "key": key,
-            "label": label,
-            "image_object": image.copy(),
-            "details": details,
-            "number": number,
-        })
+        self._stages.append({"key": key, "label": label, "image_object": image.copy(), "details": details})
 
     def set_metadata(self, **values: Any) -> None:
         if self.enabled:
@@ -58,8 +51,6 @@ class DebugArtifactCollector:
         payload["stages"] = []
         for stage in self._stages:
             value = {"label": stage["label"], "image": image_to_data_url(stage["image_object"])}
-            if stage["number"] is not None:
-                value["number"] = stage["number"]
             if stage["details"] is not None:
                 value["details"] = stage["details"]
             payload["stages"].append(value)
@@ -82,10 +73,7 @@ class DebugArtifactCollector:
                     image.save(run_directory / filename, format="PNG")
                 else:
                     image.convert("RGB").save(run_directory / filename, format="JPEG", quality=88)
-                stage_file = {"key": stage["key"], "label": stage["label"], "file": filename}
-                if stage["number"] is not None:
-                    stage_file["number"] = stage["number"]
-                stage_files.append(stage_file)
+                stage_files.append({"key": stage["key"], "label": stage["label"], "file": filename})
             manifest = {**self.metadata, "runId": self.run_id, "createdAt": datetime.now(timezone.utc).isoformat(), "stages": stage_files}
             (run_directory / "manifest.json").write_text(
                 json.dumps(manifest, ensure_ascii=False, indent=2),

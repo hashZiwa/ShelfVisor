@@ -73,11 +73,7 @@ def build_ocr_contact_sheet(image: Image.Image, regions: Sequence[DetectedRegion
     return OCRContactSheet(sheet, rows)
 
 
-def map_ocr_result_to_rows(
-    ocr_result: dict[str, Any],
-    contact_sheet: OCRContactSheet,
-    minimum_tokens: int = MIN_OCR_TOKENS,
-) -> list[dict[str, Any]]:
+def map_ocr_result_to_rows(ocr_result: dict[str, Any], contact_sheet: OCRContactSheet) -> list[dict[str, Any]]:
     rows = [{
         **row,
         "text": "",
@@ -96,7 +92,6 @@ def map_ocr_result_to_rows(
                 "lowerQuartileConfidence": 0.0,
                 "medianConfidence": 0.0,
                 "averageConfidence": 0.0,
-                "hasConfidence": False,
                 "eligible": False,
             }
             for variant in row["variants"]
@@ -112,11 +107,7 @@ def map_ocr_result_to_rows(
         rows[row_index]["variantResults"][variant_index]["tokens"].append({
             "text": annotation.get("text", ""),
             "box": box,
-            "confidence": (
-                _normalized_confidence(annotation["confidence"])
-                if annotation.get("confidence") is not None
-                else None
-            ),
+            "confidence": _normalized_confidence(annotation.get("confidence", 0.0)),
         })
     for row in rows:
         for variant in row["variantResults"]:
@@ -125,7 +116,6 @@ def map_ocr_result_to_rows(
             tokens = variant["tokens"]
             reconstruction = reconstruct_call_number([token["text"] for token in tokens])
             lower_quartile, median_confidence, average_confidence = _confidence_statistics(tokens)
-            has_confidence = any(token.get("confidence") is not None for token in tokens)
             variant.update(
                 reconstructedText=reconstruction.text,
                 structureScore=reconstruction.structure_score,
@@ -133,8 +123,7 @@ def map_ocr_result_to_rows(
                 lowerQuartileConfidence=lower_quartile,
                 medianConfidence=median_confidence,
                 averageConfidence=average_confidence,
-                hasConfidence=has_confidence,
-                eligible=len(tokens) >= minimum_tokens,
+                eligible=len(tokens) >= MIN_OCR_TOKENS,
             )
         eligible_variants = [item for item in row["variantResults"] if item["eligible"]]
         row["eligible"] = bool(eligible_variants)
@@ -176,13 +165,6 @@ def _select_best_variant(
     selected = eligible_variants[0]
     for candidate in eligible_variants[1:]:
         score_difference = candidate["structureScore"] - selected["structureScore"]
-        confidence_available = bool(
-            candidate.get("hasConfidence") and selected.get("hasConfidence")
-        )
-        if not confidence_available:
-            if score_difference > 0:
-                selected = candidate
-            continue
         if abs(score_difference) > STRUCTURE_NEAR_TIE_MARGIN:
             if score_difference > 0:
                 selected = candidate

@@ -48,15 +48,12 @@ class OCRProcessingTests(unittest.TestCase):
             for index, (text, confidence) in enumerate(zip(texts, confidences))
         ]
 
-    def _ranked_variant(
-        self, structure, lower_quartile, median_value, average, has_confidence=True
-    ):
+    def _ranked_variant(self, structure, lower_quartile, median_value, average):
         return {
             "structureScore": structure,
             "lowerQuartileConfidence": lower_quartile,
             "medianConfidence": median_value,
             "averageConfidence": average,
-            "hasConfidence": has_confidence,
         }
 
     def test_contact_sheet_contains_both_orientations(self):
@@ -134,24 +131,6 @@ class OCRProcessingTests(unittest.TestCase):
         self.assertEqual(row["selectedOrientation"], "upright")
         self.assertEqual([variant["eligible"] for variant in row["variantResults"]], [True, False])
 
-    def test_text_detection_can_accept_one_annotation_when_the_caller_lowers_the_token_gate(self):
-        row = map_ocr_result_to_rows(
-            {
-                "annotations": [
-                    {
-                        "text": "500 519.5 ㅅ21",
-                        "box": [10, 10, 60, 20],
-                        "confidence": None,
-                    }
-                ]
-            },
-            self._two_variant_sheet(),
-            minimum_tokens=1,
-        )[0]
-
-        self.assertTrue(row["eligible"])
-        self.assertEqual(row["text"], "500 519.5 ㅅ21")
-
     def test_better_structure_beats_higher_average_confidence(self):
         annotations = self._variant_annotations(
             10, ["500", "519.5", "ㅅ21"], [0.60, 0.60, 0.60]
@@ -186,12 +165,6 @@ class OCRProcessingTests(unittest.TestCase):
             _select_best_variant([lower_structure, higher_structure]),
             higher_structure,
         )
-
-    def test_missing_confidence_uses_the_higher_structure_score_even_within_margin(self):
-        upright = self._ranked_variant(10, 0.0, 0.0, 0.0, has_confidence=False)
-        rotated = self._ranked_variant(12, 0.0, 0.0, 0.0, has_confidence=False)
-
-        self.assertIs(_select_best_variant([upright, rotated]), rotated)
 
     def test_near_tie_uses_lower_quartile_before_median(self):
         better_median = self._ranked_variant(10, 0.40, 0.95, 0.95)
