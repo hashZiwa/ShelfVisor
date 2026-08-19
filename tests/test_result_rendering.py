@@ -61,6 +61,20 @@ class OCRDebugRenderingTests(unittest.TestCase):
     def test_empty_orientation_has_no_confidence_labels(self):
         self.assertEqual(_ocr_confidence_labels([]), [])
 
+    def test_missing_text_detection_confidence_is_labeled_unavailable(self):
+        self.assertEqual(
+            _ocr_confidence_labels([{"confidence": None}]),
+            ["box1: n/a"],
+        )
+
+    def test_debug_details_do_not_report_missing_confidence_as_zero(self):
+        row = self._row([None], [])
+
+        detail = build_ocr_debug_details([row])[0]
+
+        self.assertIn('"0" cN/A', detail)
+        self.assertNotIn('"0" c0.00', detail)
+
     def test_grid_adds_caption_pixels_below_both_orientation_images(self):
         row = self._row([0.95], [0.63])
         source = Image.new("RGB", (200, 120), "white")

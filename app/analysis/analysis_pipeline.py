@@ -9,7 +9,12 @@ from .analysis_models import SpineAnalysis
 from .call_number_processing import check_call_number_order
 from .debug_artifacts import DebugArtifactCollector
 from .image_processing import image_to_data_url, image_to_jpeg_bytes, image_to_png_bytes, prepare_image
-from .ocr import build_ocr_contact_sheet, map_ocr_result_to_rows, run_ocr_inference
+from .ocr import (
+    build_ocr_contact_sheet,
+    map_ocr_result_to_rows,
+    run_ocr_inference,
+    run_text_detection_inference,
+)
 from .result_rendering import (
     build_ocr_debug_details,
     grid_ocr_overlay_tiles,
@@ -82,9 +87,33 @@ def analyze_shelf_photo(
     collector = DebugArtifactCollector(include_debug, write_debug_artifacts)
     if include_debug:
         predictions = yolo_result.get("predictions", [])
+        if contact_sheet.rows:
+            try:
+                text_detection_result = run_text_detection_inference(
+                    image_to_png_bytes(contact_sheet.image)
+                )
+                text_detection_rows = map_ocr_result_to_rows(
+                    text_detection_result,
+                    contact_sheet,
+                    minimum_tokens=1,
+                )
+            except Exception as error:
+                text_detection_result = {
+                    "fullText": "",
+                    "annotations": [],
+                    "error": str(error),
+                }
+                text_detection_rows = []
+        else:
+            text_detection_result = {"fullText": "", "annotations": []}
+            text_detection_rows = []
         ocr_overlay = grid_ocr_overlay_tiles(
             render_ocr_overlay(contact_sheet.image, all_ocr_rows),
             all_ocr_rows,
+        )
+        text_detection_overlay = grid_ocr_overlay_tiles(
+            render_ocr_overlay(contact_sheet.image, text_detection_rows),
+            text_detection_rows,
         )
         collector.set_metadata(
             usedFallback=False,
@@ -94,20 +123,38 @@ def analyze_shelf_photo(
             filterOptions=options,
             ocrSheet={"rowCount": len(all_ocr_rows), "rows": all_ocr_rows},
             ocr={"fullText": ocr_result.get("fullText", ""), "annotationCount": len(ocr_result.get("annotations", []))},
+            textDetection={
+                "fullText": text_detection_result.get("fullText", ""),
+                "annotationCount": len(text_detection_result.get("annotations", [])),
+                **(
+                    {"error": text_detection_result["error"]}
+                    if text_detection_result.get("error")
+                    else {}
+                ),
+            },
+            textDetectionRows=text_detection_rows,
             model=yolo_result.get("model_id") or "models/yolo/yolo-model-v1.pt",
             rawPredictionCount=len(predictions),
         )
-        collector.add_image("original", "Original", image)
-        collector.add_image("yolo-predictions", "YOLO predictions", render_yolo_regions(image, yolo_regions, (245, 158, 11, 235)))
-        collector.add_image("size-filter", "Size filter", render_yolo_regions(image, ocr_regions, (43, 156, 94, 235)))
-        collector.add_image("ocr-contact-sheet", "OCR contact sheet", contact_sheet.image)
+        collector.add_image("original", "Original", image, number="1")
+        collector.add_image("yolo-predictions", "YOLO predictions", render_yolo_regions(image, yolo_regions, (245, 158, 11, 235)), number="2")
+        collector.add_image("size-filter", "Size filter", render_yolo_regions(image, ocr_regions, (43, 156, 94, 235)), number="3")
+        collector.add_image("ocr-contact-sheet", "OCR contact sheet", contact_sheet.image, number="4")
         collector.add_image(
             "ocr-bounding-boxes",
             "OCR bounding boxes",
             ocr_overlay,
             build_ocr_debug_details(all_ocr_rows),
+            number="5",
         )
-        collector.add_image("final-result", "Final result", annotated)
+        collector.add_image(
+            "text-detection-ocr",
+            "TEXT_DETECTION OCR",
+            text_detection_overlay,
+            build_ocr_debug_details(text_detection_rows),
+            number="5(2)",
+        )
+        collector.add_image("final-result", "Final result", annotated, number="6")
         collector.write()
         result["debug"] = collector.build_payload()
     return result

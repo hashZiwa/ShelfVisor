@@ -99,9 +99,13 @@ def render_ocr_overlay(image: Image.Image, rows: Sequence[dict[str, Any]]) -> Im
 
 def _ocr_confidence_labels(tokens: Sequence[dict[str, Any]]) -> list[str]:
     return [
-        f"box{index}: {float(token.get('confidence', 0.0) or 0.0):.2f}"
+        f"box{index}: {_format_ocr_confidence(token.get('confidence'))}"
         for index, token in enumerate(tokens, start=1)
     ]
+
+
+def _format_ocr_confidence(value: Any) -> str:
+    return "n/a" if value is None else f"{float(value or 0.0):.2f}"
 
 
 def grid_ocr_overlay_tiles(
@@ -155,7 +159,7 @@ def build_ocr_debug_details(rows: Sequence[dict[str, Any]]) -> list[str]:
         for variant in row.get("variantResults", []):
             tokens = variant.get("tokens", [])
             token_summary = ", ".join(
-                f'"{token["text"]}" c{float(token.get("confidence", 0.0) or 0.0):.2f} @ {token["box"]}'
+                f'"{token["text"]}" c{_format_ocr_confidence(token.get("confidence")).upper()} @ {token["box"]}'
                 for token in tokens
             ) or "no tokens"
             eligibility = "rejected" if variant.get("eligible") is False else "eligible"
@@ -167,10 +171,17 @@ def build_ocr_debug_details(rows: Sequence[dict[str, Any]]) -> list[str]:
             low25 = float(variant.get("lowerQuartileConfidence", 0.0) or 0.0)
             median_confidence = float(variant.get("medianConfidence", 0.0) or 0.0)
             average = float(variant.get("averageConfidence", 0.0) or 0.0)
+            has_confidence = variant.get("hasConfidence")
+            if has_confidence is None:
+                has_confidence = any(token.get("confidence") is not None for token in tokens)
+            confidence_summary = (
+                f"low25 {low25:.2f} median {median_confidence:.2f} avg {average:.2f}"
+                if has_confidence
+                else "low25 N/A median N/A avg N/A"
+            )
             candidate_summary = (
                 f'raw "{raw_text}" parsed "{reconstructed}" structure {score} '
-                f'discarded {discarded} low25 {low25:.2f} '
-                f'median {median_confidence:.2f} avg {average:.2f}'
+                f'discarded {discarded} {confidence_summary}'
             )
             parts.append(
                 f'{variant.get("orientation", "unknown")} {eligibility}{selected} '

@@ -29,9 +29,10 @@ class AnalysisPipelineTests(unittest.TestCase):
             ],
         }
 
+    @patch("app.analysis.analysis_pipeline.run_text_detection_inference")
     @patch("app.analysis.analysis_pipeline.run_ocr_inference")
     @patch("app.analysis.analysis_pipeline.run_yolo_inference")
-    def test_pipeline_preserves_response_shape(self, run_yolo, run_ocr):
+    def test_pipeline_preserves_response_shape(self, run_yolo, run_ocr, run_text_ocr):
         run_yolo.return_value = self.yolo_result
         run_ocr.return_value = self.ocr_result
 
@@ -40,25 +41,76 @@ class AnalysisPipelineTests(unittest.TestCase):
         self.assertEqual(result["summary"]["bookCount"], 1)
         self.assertEqual(result["spines"][0]["call_number"], "811.3 A")
         self.assertTrue(result["annotatedImage"].startswith("data:image/jpeg;base64,"))
+        run_text_ocr.assert_not_called()
 
+    @patch("app.analysis.analysis_pipeline.run_text_detection_inference")
     @patch("app.analysis.analysis_pipeline.run_ocr_inference")
     @patch("app.analysis.analysis_pipeline.run_yolo_inference")
-    def test_debug_payload_contains_ordered_stage_labels(self, run_yolo, run_ocr):
+    def test_debug_payload_keeps_text_detection_rows_separate_from_final_results(
+        self, run_yolo, run_document_ocr, run_text_ocr
+    ):
+        run_yolo.return_value = self.yolo_result
+        run_document_ocr.return_value = self.ocr_result
+        run_text_ocr.return_value = {
+            "fullText": "500\n519.5\nㅅ21\n",
+            "annotations": [
+                {"text": "500", "box": [100, 40, 10, 10], "confidence": None},
+                {"text": "519.5", "box": [100, 55, 10, 10], "confidence": None},
+                {"text": "ㅅ21", "box": [100, 70, 10, 10], "confidence": None},
+            ],
+        }
+
+        result = analyze_shelf_photo(self.image_bytes, include_debug=True)
+
+        self.assertEqual(result["spines"][0]["call_number"], "811.3 A")
+        self.assertEqual(result["debug"]["textDetection"]["fullText"], "500\n519.5\nㅅ21\n")
+        self.assertEqual(result["debug"]["textDetectionRows"][0]["text"], "500 519.5 ㅅ21")
+        text_stage = result["debug"]["stages"][5]
+        self.assertEqual(text_stage["number"], "5(2)")
+        self.assertEqual(text_stage["label"], "TEXT_DETECTION OCR")
+        run_text_ocr.assert_called_once()
+
+    @patch("app.analysis.analysis_pipeline.run_text_detection_inference")
+    @patch("app.analysis.analysis_pipeline.run_ocr_inference")
+    @patch("app.analysis.analysis_pipeline.run_yolo_inference")
+    def test_text_detection_failure_is_reported_without_losing_document_results(
+        self, run_yolo, run_document_ocr, run_text_ocr
+    ):
+        run_yolo.return_value = self.yolo_result
+        run_document_ocr.return_value = self.ocr_result
+        run_text_ocr.side_effect = RuntimeError("TEXT_DETECTION unavailable")
+
+        result = analyze_shelf_photo(self.image_bytes, include_debug=True)
+
+        self.assertEqual(result["spines"][0]["call_number"], "811.3 A")
+        self.assertEqual(
+            result["debug"]["textDetection"]["error"],
+            "TEXT_DETECTION unavailable",
+        )
+        self.assertEqual(result["debug"]["textDetectionRows"], [])
+        self.assertEqual(result["debug"]["stages"][5]["number"], "5(2)")
+
+    @patch("app.analysis.analysis_pipeline.run_text_detection_inference")
+    @patch("app.analysis.analysis_pipeline.run_ocr_inference")
+    @patch("app.analysis.analysis_pipeline.run_yolo_inference")
+    def test_debug_payload_contains_ordered_stage_labels(self, run_yolo, run_ocr, run_text_ocr):
         run_yolo.return_value = self.yolo_result
         run_ocr.return_value = self.ocr_result
+        run_text_ocr.return_value = self.ocr_result
 
         result = analyze_shelf_photo(self.image_bytes, include_debug=True)
 
         self.assertEqual(
             [stage["label"] for stage in result["debug"]["stages"]],
-            ["Original", "YOLO predictions", "Size filter", "OCR contact sheet", "OCR bounding boxes", "Final result"],
+            ["Original", "YOLO predictions", "Size filter", "OCR contact sheet", "OCR bounding boxes", "TEXT_DETECTION OCR", "Final result"],
         )
 
+    @patch("app.analysis.analysis_pipeline.run_text_detection_inference")
     @patch("app.analysis.analysis_pipeline.run_ocr_inference")
     @patch("app.analysis.analysis_pipeline.build_ocr_contact_sheet")
     @patch("app.analysis.analysis_pipeline.run_yolo_inference")
     def test_fully_rejected_row_is_debugged_then_removed_from_final_results(
-        self, run_yolo, build_sheet, run_ocr
+        self, run_yolo, build_sheet, run_ocr, run_text_ocr
     ):
         run_yolo.return_value = {
             "predictions": [
@@ -98,6 +150,7 @@ class AnalysisPipelineTests(unittest.TestCase):
                 {"text": "good3", "box": [10, 150, 20, 10], "confidence": 0.9},
             ],
         }
+        run_text_ocr.return_value = run_ocr.return_value
 
         result = analyze_shelf_photo(self.image_bytes, include_debug=True)
 
@@ -108,8 +161,8 @@ class AnalysisPipelineTests(unittest.TestCase):
         self.assertEqual(result["debug"]["ocrSheet"]["rowCount"], 2)
         self.assertFalse(result["debug"]["ocrSheet"]["rows"][0]["eligible"])
         self.assertEqual(
-            [stage["label"] for stage in result["debug"]["stages"]][-2:],
-            ["OCR bounding boxes", "Final result"],
+            [stage["label"] for stage in result["debug"]["stages"]][-3:],
+            ["OCR bounding boxes", "TEXT_DETECTION OCR", "Final result"],
         )
 
 

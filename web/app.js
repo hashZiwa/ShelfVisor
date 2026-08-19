@@ -18,6 +18,9 @@ const misplacedCount = document.querySelector("#misplacedCount");
 const analysisStatus = document.querySelector("#analysisStatus");
 const helperText = document.querySelector("#helperText");
 const spineList = document.querySelector("#spineList");
+const textDetectionPanel = document.querySelector("#textDetectionPanel");
+const textDetectionHelper = document.querySelector("#textDetectionHelper");
+const textDetectionList = document.querySelector("#textDetectionList");
 const debugPanel = document.querySelector("#debugPanel");
 const debugTabs = document.querySelector("#debugTabs");
 const debugImage = document.querySelector("#debugImage");
@@ -285,6 +288,8 @@ function setLoading() {
   dropZone.classList.add("is-loading");
   loadingOverlay.hidden = false;
   spineList.innerHTML = "";
+  textDetectionPanel.hidden = true;
+  textDetectionList.innerHTML = "";
   batchTabs.hidden = true;
   batchTabs.innerHTML = "";
   debugPanel.hidden = true;
@@ -370,6 +375,8 @@ function renderFailedBatchItem(item, summary) {
   analysisStatus.textContent = "Failed";
   helperText.textContent = `${item?.filename || "Image"} failed: ${item?.error || "Unknown error"}. Batch ${summary.completedCount}/${summary.imageCount} completed.`;
   spineList.innerHTML = "";
+  textDetectionPanel.hidden = true;
+  textDetectionList.innerHTML = "";
   debugPanel.hidden = true;
 }
 
@@ -408,6 +415,8 @@ function renderSpine(spine) {
 function renderDebug(debug) {
   if (!debug || !debug.stages || debug.stages.length === 0) {
     debugPanel.hidden = true;
+    textDetectionPanel.hidden = true;
+    textDetectionList.innerHTML = "";
     return;
   }
 
@@ -422,7 +431,7 @@ function renderDebug(debug) {
     .map(
       (stage, index) =>
         `<button class="debug-tab" type="button" data-index="${index}" aria-pressed="false">
-          ${index + 1}. ${stage.label}
+          ${escapeHtml(stage.number || String(index + 1))}. ${escapeHtml(stage.label)}
         </button>`,
     )
     .join("");
@@ -438,13 +447,47 @@ function renderDebug(debug) {
       setDebugStage(debug, index);
     });
   });
+
+  const textRows = Array.isArray(debug.textDetectionRows) ? debug.textDetectionRows : [];
+  textDetectionPanel.hidden = false;
+  textDetectionHelper.textContent = debug.textDetection?.error
+    ? `TEXT_DETECTION failed: ${debug.textDetection.error}`
+    : `${textRows.length} contact-sheet row${textRows.length === 1 ? "" : "s"} processed without word confidence.`;
+  const emptyTextDetectionCard = debug.textDetection?.error
+    ? `<article class="spine-item text-detection-item misplaced"><span class="pill warn">Failed</span><span class="label">TEXT_DETECTION result unavailable</span><span class="detail">${escapeHtml(debug.textDetection.error)}</span></article>`
+    : '<article class="spine-item text-detection-item misplaced"><span class="pill warn">Empty</span><span class="label">No TEXT_DETECTION rows</span><span class="detail">The contact sheet contained no OCR regions.</span></article>';
+  textDetectionList.innerHTML = textRows.length
+    ? textRows
+        .map((row) => {
+          const variants = Array.isArray(row.variantResults) ? row.variantResults : [];
+          const selected = variants.find((variant) => variant.orientation === row.selectedOrientation);
+          const stateText = row.eligible ? "Selected" : "Rejected";
+          const callNumber = row.text || "No accepted call number";
+          const orientation = selected ? selected.orientation : "No orientation selected";
+          const rawVariants = variants
+            .map((variant) => `${variant.orientation}: ${variant.text || "—"}`)
+            .join(" · ");
+          return `
+            <article class="spine-item text-detection-item ${row.eligible ? "" : "misplaced"}">
+              <span class="pill ${row.eligible ? "" : "warn"}">${stateText}</span>
+              <span class="label">${escapeHtml(callNumber)}</span>
+              <span class="detail">Row ${escapeHtml(String(row.index))} · ${escapeHtml(orientation)}</span>
+              <span class="detail text-detection-raw">${escapeHtml(rawVariants || "No text annotations mapped")}</span>
+            </article>
+          `;
+        })
+        .join("")
+    : emptyTextDetectionCard;
 }
 
 function setDebugStage(debug, index) {
   const stage = debug.stages[index];
   selectedDebugStageIndex = index;
   debugImage.src = stage.image;
-  debugImage.classList.toggle("wide-debug-image", stage.label === "OCR bounding boxes");
+  debugImage.classList.toggle(
+    "wide-debug-image",
+    stage.label === "OCR bounding boxes" || stage.label === "TEXT_DETECTION OCR",
+  );
   filterControls.hidden = stage.label !== "Size filter";
   renderDebugDetails(stage.details || []);
   debugTabs.querySelectorAll(".debug-tab").forEach((tab) => {
@@ -490,7 +533,7 @@ function getSelectedTestImageNames() {
 }
 
 function escapeHtml(value) {
-  return value
+  return String(value)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")

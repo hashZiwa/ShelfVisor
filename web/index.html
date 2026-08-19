@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ShelfVisor</title>
-    <link rel="stylesheet" href="/styles.css?v=local6" />
+    <link rel="stylesheet" href="/styles.css?v=local7" />
   </head>
   <body>
     <main class="shell">
@@ -110,8 +110,16 @@
           </div>
           <div id="spineList" class="spine-list"></div>
         </section>
+
+        <section id="textDetectionPanel" class="results text-detection-panel" aria-label="TEXT_DETECTION call numbers" hidden>
+          <div class="section-heading">
+            <h2>TEXT_DETECTION call numbers</h2>
+            <span id="textDetectionHelper">Debug results will appear here.</span>
+          </div>
+          <div id="textDetectionList" class="spine-list"></div>
+        </section>
       </section>
     </main>
-    <script src="/app.js?v=local6"></script>
+    <script src="/app.js?v=local7"></script>
   </body>
 </html>

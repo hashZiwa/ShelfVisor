@@ -30,6 +30,29 @@ def run_ocr_inference(image_bytes: bytes) -> dict[str, Any]:
     return {"fullText": response.full_text_annotation.text or "", "annotations": annotations}
 
 
+def run_text_detection_inference(image_bytes: bytes) -> dict[str, Any]:
+    _load_local_env()
+    client = _client(_credentials_path())
+    try:
+        from google.cloud import vision
+    except ImportError as error:
+        raise RuntimeError("Google Vision OCR requires google-cloud-vision. Install project dependencies with `python -m pip install -r requirements.txt`.") from error
+    response = client.text_detection(image=vision.Image(content=image_bytes))
+    if response.error.message:
+        raise RuntimeError(f"Google Vision TEXT_DETECTION failed: {response.error.message}")
+    text_annotations = list(response.text_annotations)
+    full_text = text_annotations[0].description if text_annotations else ""
+    annotations = [
+        {
+            "text": annotation.description,
+            "box": _box_from_vertices(annotation.bounding_poly.vertices),
+            "confidence": None,
+        }
+        for annotation in text_annotations[1:]
+    ]
+    return {"fullText": full_text, "annotations": annotations}
+
+
 def _annotations_from_full_text(full_text_annotation: Any) -> list[dict[str, Any]]:
     annotations = []
     for page in getattr(full_text_annotation, "pages", []):
